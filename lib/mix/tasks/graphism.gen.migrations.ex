@@ -15,7 +15,9 @@ defmodule Mix.Tasks.Graphism.Gen.Migrations do
 
   @impl true
   def run(_args) do
-    module = GraphismWeb.Schema
-    Migrations.generate(module: module)
+    Mix.Task.run("app.start")
+
+    schema = Application.get_env(:graphism, :schema)
+    Migrations.generate(module: schema)
   end
 end

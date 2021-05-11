@@ -5,9 +5,6 @@ defmodule Graphism.Migrations do
   """
   require Logger
 
-  @migrations_dir Path.join([File.cwd!(), "priv/repo/migrations"])
-  @migrations Path.join([@migrations_dir, "*_graphism_*.exs"])
-
   @doc """
   Generate migrations for the given schema.
 
@@ -15,7 +12,10 @@ defmodule Graphism.Migrations do
   def generate(module: mod) do
     schema = mod.schema()
 
-    migrations = existing_migrations()
+    migrations_dir = Path.join([File.cwd!(), "priv/repo/migrations"])
+    migrations_files = Path.join([migrations_dir, "*_graphism_*.exs"])
+
+    migrations = existing_migrations(migrations_files)
 
     existing_migrations =
       read_migrations(migrations)
@@ -31,7 +31,7 @@ defmodule Graphism.Migrations do
         schema_migration
       )
 
-    write_migration(missing_migrations, last_migration_version + 1, dir: File.cwd!())
+    write_migration(missing_migrations, last_migration_version + 1, dir: migrations_dir)
   end
 
   defp migration_from_schema(schema) do
@@ -330,8 +330,8 @@ defmodule Graphism.Migrations do
     [column: col, type: spec[:type], opts: spec[:opts], action: action, kind: :column]
   end
 
-  defp existing_migrations() do
-    @migrations
+  defp existing_migrations(migrations) do
+    migrations
     |> Path.wildcard()
     |> Enum.sort()
     |> Enum.map(&File.read!(&1))
@@ -741,9 +741,6 @@ defmodule Graphism.Migrations do
     path =
       Path.join([
         opts[:dir],
-        "priv",
-        "repo",
-        "migrations",
         "#{timestamp}_graphism_v#{version}.exs"
       ])
 

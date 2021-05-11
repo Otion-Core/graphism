@@ -52,10 +52,23 @@ Graphism will keep track of your schema changes and
 generate proper Ecto migrations:
 
 
+First, you need to tell graphism about your schema. In your config.exs,
+
+
+```elixir
+config :graphism,
+  schema: MyBlogWeb.Schema
+```
+
+Then:
+
 ```
 $ mix graphism.gen.migrations
 
 ```
+
+Do not forget to run `mix ecto.migrate` afterwards.
+
 
 ## Github Workflow :dna:
 Our commit convention follows [conventionalcommits.org](https://www.conventionalcommits.org) workflow.
