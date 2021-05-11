@@ -540,6 +540,8 @@ defmodule Graphism do
 
     quote do
       defmodule unquote(e[:api_module]) do
+        import Ecto.Query, only: [from: 2]
+
         def list do
           unquote(schema_module)
           |> unquote(repo_module).all()
@@ -579,6 +581,25 @@ defmodule Graphism do
                   e ->
                     {:ok, e}
                 end
+              end
+            end
+          end)
+        )
+
+        unquote_splicing(
+          e[:relations]
+          |> Enum.filter(fn rel -> rel[:kind] == :belongs_to end)
+          |> Enum.map(fn rel ->
+            quote do
+              def unquote(String.to_atom("list_by_#{rel[:name]}"))(id) do
+                query =
+                  from unquote(Macro.var(rel[:name], nil)) in unquote(schema_module),
+                    where:
+                      unquote(Macro.var(rel[:name], nil)).unquote(
+                        String.to_atom("#{rel[:name]}_id")
+                      ) == ^id
+
+                unquote(repo_module).all(query)
               end
             end
           end)
@@ -750,13 +771,6 @@ defmodule Graphism do
     quote do
       @desc "List all " <> unquote("#{e[:plural_display_name]}")
       field unquote(e[:plural]), list_of(unquote(e[:name])) do
-        # middleware(:auth)
-        complexity(fn %{limit: limit}, child_complexity ->
-          # set complexity based on maximum number of items in the list and
-          # complexity of a child.
-          limit * child_complexity
-        end)
-
         resolve(&unquote(e[:resolver_module]).list_all/3)
       end
     end
