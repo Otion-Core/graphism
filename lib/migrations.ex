@@ -759,7 +759,7 @@ defmodule Graphism.Migrations do
   defp tables_graph(migrations) do
     tables =
       migrations
-      |> Enum.filter(fn m -> m[:kind] == :table end)
+      |> Enum.filter(fn m -> m[:kind] == :table and m[:action] == :create end)
 
     graph =
       Enum.reduce(tables, Graph.new(), fn m, g ->
@@ -776,8 +776,13 @@ defmodule Graphism.Migrations do
   end
 
   defp table_index(tables, tab) do
-    {^tab, index} = Enum.find(tables, fn {t, _} -> tab == t end)
-    index
+    case Enum.find(tables, fn {t, _} -> tab == t end) do
+      nil ->
+        raise "Table #{tab} could not be found in tables graph #{inspect(tables)}. This is a bug. Maybe a table was renamed?"
+
+      {^tab, index} ->
+        index
+    end
   end
 
   # Sort migrations so that:
@@ -796,7 +801,13 @@ defmodule Graphism.Migrations do
     |> Enum.map(fn m ->
       case m[:kind] do
         :table ->
-          {m, table_index(tables, m[:table])}
+          case m[:action] do
+            :create ->
+              {m, table_index(tables, m[:table])}
+
+            :drop ->
+              {m, -1000}
+          end
 
         :enum ->
           {m, 1000}
