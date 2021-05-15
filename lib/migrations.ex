@@ -790,7 +790,6 @@ defmodule Graphism.Migrations do
       migrations
       |> tables_graph()
       |> Graph.topsort()
-      |> IO.inspect()
       |> Enum.with_index()
 
     migrations

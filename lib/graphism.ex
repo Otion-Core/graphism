@@ -90,6 +90,14 @@ defmodule Graphism do
       schema
       |> Enum.reverse()
 
+    schema
+    |> Enum.each(fn e ->
+      if Enum.empty?(e[:attributes]) and
+           Enum.empty?(e[:relations]) do
+        raise "Entity #{e[:name]} is empty"
+      end
+    end)
+
     schema_modules =
       schema
       |> Enum.map(fn e ->
@@ -151,6 +159,8 @@ defmodule Graphism do
   end
 
   defmacro entity(name, _attrs \\ [], do: block) do
+    caller_module = __CALLER__.module
+
     attrs = attributes_from(block)
     rels = relations_from(block)
 
@@ -158,9 +168,9 @@ defmodule Graphism do
       [name: name, attributes: attrs, relations: rels, enums: []]
       |> with_plural()
       |> with_table_name()
-      |> with_schema_module()
-      |> with_api_module()
-      |> with_resolver_module()
+      |> with_schema_module(caller_module)
+      |> with_api_module(caller_module)
+      |> with_resolver_module(caller_module)
       |> with_enums()
 
     Module.put_attribute(__CALLER__.module, :schema, entity)
@@ -168,7 +178,10 @@ defmodule Graphism do
     block
   end
 
-  defmacro attribute(_name, _type, _attrs \\ []) do
+  defmacro attribute(name, type, opts \\ []) do
+    validate_attribute_name!(name)
+    validate_attribute_type!(type)
+    validate_attribute_opts!(opts)
   end
 
   defmacro has_many(_name, _opts \\ []) do
@@ -178,6 +191,35 @@ defmodule Graphism do
   end
 
   defmacro belongs_to(_name, _opts \\ []) do
+  end
+
+  defp validate_attribute_name!(name) do
+    unless is_atom(name) do
+      raise "Attribute #{name} should be an atom"
+    end
+  end
+
+  @supported_attribute_types [
+    :id,
+    :string,
+    :integer,
+    :number,
+    :date,
+    :boolean
+  ]
+
+  defp validate_attribute_type!(type) do
+    unless Enum.member?(@supported_attribute_types, type) do
+      raise "Unsupported attribute type #{inspect(type)}. Must be one of #{
+              inspect(@supported_attribute_types)
+            }"
+    end
+  end
+
+  defp validate_attribute_opts!(opts) do
+    unless is_list(opts) do
+      raise "Unsupported attribute opts #{inspect(opts)}. Must be a keyword list"
+    end
   end
 
   defp with_plural(entity) do
@@ -200,21 +242,21 @@ defmodule Graphism do
     Keyword.put(entity, :table, table_name)
   end
 
-  defp with_schema_module(entity) do
-    module_name(entity, :schema_module)
+  defp with_schema_module(entity, caller_mod) do
+    module_name(caller_mod, entity, :schema_module)
   end
 
-  defp with_resolver_module(entity) do
-    module_name(entity, :resolver_module, :resolver)
+  defp with_resolver_module(entity, caller_mod) do
+    module_name(caller_mod, entity, :resolver_module, :resolver)
   end
 
-  defp with_api_module(entity) do
-    module_name(entity, :api_module, :api)
+  defp with_api_module(entity, caller_mod) do
+    module_name(caller_mod, entity, :api_module, :api)
   end
 
-  defp module_name(entity, name, suffix \\ nil) do
+  defp module_name(prefix, entity, name, suffix \\ nil) do
     module_name =
-      [entity[:name], suffix]
+      [prefix, entity[:name], suffix]
       |> Enum.reject(fn part -> part == nil end)
       |> Enum.map(&Atom.to_string(&1))
       |> Enum.map(&Inflex.camelize(&1))
@@ -331,6 +373,22 @@ defmodule Graphism do
         use Ecto.Schema
         import Ecto.Changeset
 
+        unquote_splicing(
+          # alias all modules referenced by has_many
+          # relations
+
+          e[:relations]
+          |> Enum.filter(fn rel -> rel[:kind] == :has_many end)
+          |> Enum.map(fn rel ->
+            target = find_entity!(schema, rel[:target])
+            schema_module = target[:schema_module]
+
+            quote do
+              alias unquote(schema_module)
+            end
+          end)
+        )
+
         @primary_key {:id, :binary_id, autogenerate: false}
 
         schema unquote("#{e[:plural]}") do
@@ -354,6 +412,19 @@ defmodule Graphism do
                 Ecto.Schema.belongs_to(unquote(rel[:name]), unquote(target[:schema_module]),
                   type: :binary_id
                 )
+              end
+            end)
+          )
+
+          unquote_splicing(
+            e[:relations]
+            |> Enum.filter(fn rel -> rel[:kind] == :has_many end)
+            |> Enum.map(fn rel ->
+              target = find_entity!(schema, rel[:target])
+              schema_module = target[:schema_module]
+
+              quote do
+                Ecto.Schema.has_many(unquote(rel[:name]), unquote(schema_module))
               end
             end)
           )
@@ -593,11 +664,12 @@ defmodule Graphism do
             quote do
               def unquote(String.to_atom("list_by_#{rel[:name]}"))(id) do
                 query =
-                  from unquote(Macro.var(rel[:name], nil)) in unquote(schema_module),
+                  from(unquote(Macro.var(rel[:name], nil)) in unquote(schema_module),
                     where:
                       unquote(Macro.var(rel[:name], nil)).unquote(
                         String.to_atom("#{rel[:name]}_id")
                       ) == ^id
+                  )
 
                 unquote(repo_module).all(query)
               end
@@ -714,27 +786,29 @@ defmodule Graphism do
              kind = attr_graphql_type(e, attr)
 
              quote do
-               field unquote(attr[:name]), unquote(kind)
+               field(unquote(attr[:name]), unquote(kind))
              end
            end) ++
              Enum.map(e[:relations], fn rel ->
                # Add a field for each relation
                quote do
-                 field unquote(rel[:name]),
-                       unquote(
-                         case rel[:kind] do
-                           :has_many ->
-                             quote do
-                               list_of(unquote(rel[:target]))
-                             end
-
-                           _ ->
-                             quote do
-                               non_null(unquote(rel[:target]))
-                             end
+                 field(
+                   unquote(rel[:name]),
+                   unquote(
+                     case rel[:kind] do
+                       :has_many ->
+                         quote do
+                           list_of(unquote(rel[:target]))
                          end
-                       ),
-                       resolve: dataloader(unquote(opts[:caller]).Dataloader.Repo)
+
+                       _ ->
+                         quote do
+                           non_null(unquote(rel[:target]))
+                         end
+                     end
+                   ),
+                   resolve: dataloader(unquote(opts[:caller]).Dataloader.Repo)
+                 )
                end
              end)
          ))
@@ -915,6 +989,14 @@ defmodule Graphism do
     |> Enum.reject(fn attr -> attr == nil end)
   end
 
+  defp attributes_from({:attribute, _, attr}) do
+    [attribute(attr)]
+  end
+
+  defp attributes_from(_) do
+    []
+  end
+
   defp attribute([name, kind]), do: [name: name, kind: kind, opts: []]
   defp attribute([name, kind, opts]), do: [name: name, kind: kind, opts: opts]
 
@@ -943,5 +1025,9 @@ defmodule Graphism do
         nil
     end)
     |> Enum.reject(fn rel -> rel == nil end)
+  end
+
+  defp relations_from(_) do
+    []
   end
 end
