@@ -112,6 +112,7 @@ defmodule Graphism do
       end
     end)
 
+
     schema_empty_modules =
       schema
       |> Enum.map(fn e ->
