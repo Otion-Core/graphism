@@ -22,6 +22,7 @@ defmodule Graphism.MixProject do
   defp deps do
     [
       {:absinthe, "~> 1.5"},
+      {:calendar, "~> 1.0.0"},
       {:dataloader, "~> 1.0.0"},
       {:ecto_sql, "~> 3.4"},
       {:inflex, "~> 2.0.0"},
