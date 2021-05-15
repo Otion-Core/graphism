@@ -79,6 +79,18 @@ defmodule Graphism do
       __CALLER__.module
       |> Module.get_attribute(:repo)
 
+    unless length(schema) > 0 do
+      raise """
+        Your Graphism schema is empty. Please define at least
+        one entity:
+
+        entity :my_entity do
+          attribute :id, :id
+          attribute :name, :string
+        end 
+      """
+    end
+
     schema_fun =
       quote do
         def schema do

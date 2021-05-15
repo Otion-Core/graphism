@@ -18,6 +18,15 @@ defmodule Mix.Tasks.Graphism.Gen.Migrations do
     Mix.Task.run("app.start")
 
     schema = Application.get_env(:graphism, :schema)
+
+    unless schema do
+      raise """
+        Please specify your graphism schema, eg: 
+
+        config :graphism, schema: Your.Schema
+      """
+    end
+
     Migrations.generate(module: schema)
   end
 end
