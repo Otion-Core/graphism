@@ -247,7 +247,8 @@ defmodule Graphism do
   defp with_plural(entity) do
     case entity[:plural] do
       nil ->
-        Keyword.put(entity, :plural, String.to_atom("#{entity[:name]}s"))
+        plural = Inflex.pluralize("#{entity[:name]}")
+        Keyword.put(entity, :plural, String.to_atom(plural))
 
       _ ->
         entity
