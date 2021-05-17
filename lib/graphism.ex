@@ -112,7 +112,6 @@ defmodule Graphism do
       end
     end)
 
-
     schema_empty_modules =
       schema
       |> Enum.map(fn e ->
@@ -550,7 +549,10 @@ defmodule Graphism do
             case Enum.filter(e[:relations], fn rel -> rel[:kind] == :belongs_to end) do
               [] ->
                 quote do
-                  unquote(api_module).create(args)
+                  # Generate an id for the new resource
+                  args
+                  |> Map.put(:id, Ecto.UUID.generate())
+                  |> unquote(api_module).create()
                 end
 
               rels ->
@@ -567,7 +569,10 @@ defmodule Graphism do
                            end
                          end)
                        ) do
-                    args = Map.drop(args, unquote(Enum.map(rels, fn rel -> rel[:name] end)))
+                    args =
+                      args
+                      |> Map.drop(unquote(Enum.map(rels, fn rel -> rel[:name] end)))
+                      |> Map.put(:id, Ecto.UUID.generate())
 
                     unquote(api_module).create(
                       unquote_splicing(
@@ -809,7 +814,7 @@ defmodule Graphism do
     quote do
       object unquote(e[:name]) do
         (unquote_splicing(
-           # Add a field for each attribute
+           # Add a field for each attribute. 
            Enum.map(e[:attributes], fn attr ->
              # determine the kind for this field, depending
              # on whether it is an enum or not
@@ -948,13 +953,15 @@ defmodule Graphism do
       @desc unquote("Create a new #{e[:display_name]}")
       field unquote(mutation_name), non_null(unquote(e[:name])) do
         unquote_splicing(
-          Enum.map(e[:attributes], fn attr ->
-            kind = attr_graphql_type(e, attr)
+          (e[:attributes]
+           |> Enum.filter(fn attr -> attr[:name] != :id end)
+           |> Enum.map(fn attr ->
+             kind = attr_graphql_type(e, attr)
 
-            quote do
-              arg(unquote(attr[:name]), non_null(unquote(kind)))
-            end
-          end) ++
+             quote do
+               arg(unquote(attr[:name]), non_null(unquote(kind)))
+             end
+           end)) ++
             (e[:relations]
              |> Enum.filter(fn rel -> :belongs_to == rel[:kind] || :has_one == rel[:kind] end)
              |> Enum.map(fn rel ->
