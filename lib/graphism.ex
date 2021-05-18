@@ -12,8 +12,6 @@ defmodule Graphism do
   defmacro __using__(opts \\ []) do
     Code.compiler_options(ignore_module_conflict: true)
 
-    alias Dataloader, as: DL
-
     repo = opts[:repo]
 
     unless repo do
@@ -32,9 +30,11 @@ defmodule Graphism do
 
     Module.put_attribute(__CALLER__.module, :repo, opts[:repo])
 
+    alias Dataloader, as: DL
+
     quote do
       defmodule Dataloader.Repo do
-        def data() do
+        def data do
           DL.Ecto.new(unquote(repo), query: &query/2)
         end
 
@@ -45,6 +45,7 @@ defmodule Graphism do
 
       import unquote(__MODULE__), only: :macros
       @before_compile unquote(__MODULE__)
+
       use Absinthe.Schema
       import Absinthe.Resolution.Helpers, only: [dataloader: 1]
 
@@ -63,11 +64,9 @@ defmodule Graphism do
         [Absinthe.Middleware.Dataloader] ++ Absinthe.Plugin.defaults()
       end
 
-      def middleware(middleware, _field, %{identifier: :mutation}) do
+      def middleware(middleware, _field, object) do
         middleware ++ [Graphism.ErrorMiddleware]
       end
-
-      def middleware(middleware, _field, _object), do: middleware
     end
   end
 
@@ -89,7 +88,7 @@ defmodule Graphism do
         entity :my_entity do
           attribute :id, :id
           attribute :name, :string
-        end 
+        end
       """
     end
 
@@ -144,23 +143,60 @@ defmodule Graphism do
         graphql_object(e, schema, caller: __CALLER__.module)
       end)
 
+    self_resolver =
+      quote do
+        defmodule Resolver.Self do
+          def itself(parent, _, _) do
+            {:ok, parent}
+          end
+        end
+      end
+
+    entities_queries =
+      Enum.flat_map(schema, fn e ->
+        [single_graphql_queries(e, schema), multiple_graphql_queries(e, schema)]
+      end)
+
     queries =
       quote do
         query do
           (unquote_splicing(
              Enum.flat_map(schema, fn e ->
-               graphql_queries(e, schema)
+               [
+                 quote do
+                   field unquote(String.to_atom("#{e[:plural]}")),
+                         non_null(unquote(String.to_atom("#{e[:plural]}_queries"))) do
+                     resolve(&Resolver.Self.itself/3)
+                   end
+                 end,
+                 quote do
+                   field unquote(String.to_atom("#{e[:name]}")),
+                         non_null(unquote(String.to_atom("#{e[:name]}_queries"))) do
+                     resolve(&Resolver.Self.itself/3)
+                   end
+                 end
+               ]
              end)
            ))
         end
       end
 
+    entities_mutations =
+      Enum.map(schema, fn e ->
+        graphql_mutations(e, schema)
+      end)
+
     mutations =
       quote do
         mutation do
           (unquote_splicing(
-             Enum.flat_map(schema, fn e ->
-               graphql_mutations(e, schema)
+             Enum.map(schema, fn e ->
+               quote do
+                 field unquote(String.to_atom("#{e[:name]}")),
+                       non_null(unquote(String.to_atom("#{e[:name]}_mutations"))) do
+                   resolve(&Resolver.Self.itself/3)
+                 end
+               end
              end)
            ))
         end
@@ -174,7 +210,10 @@ defmodule Graphism do
       resolver_modules,
       enums,
       objects,
+      self_resolver,
+      entities_queries,
       queries,
+      entities_mutations,
       mutations
     ])
   end
@@ -350,7 +389,7 @@ defmodule Graphism do
     |> :string.titlecase()
   end
 
-  # Ensure all relations are properly formed. 
+  # Ensure all relations are properly formed.
   # This function will raise an error if the target entity
   # for a relation cannot be found
   defp with_relations!(e, index, plurals) do
@@ -814,7 +853,7 @@ defmodule Graphism do
     quote do
       object unquote(e[:name]) do
         (unquote_splicing(
-           # Add a field for each attribute. 
+           # Add a field for each attribute.
            Enum.map(e[:attributes], fn attr ->
              # determine the kind for this field, depending
              # on whether it is an enum or not
@@ -867,19 +906,36 @@ defmodule Graphism do
     end)
   end
 
-  defp graphql_queries(e, schema) do
-    List.flatten([
-      graphql_query_list_all(e, schema),
-      graphql_query_find_by_id(e, schema),
-      graphql_query_find_by_unique_fields(e, schema),
-      graphql_query_find_by_parent_types(e, schema)
-    ])
+  defp single_graphql_queries(e, schema) do
+    quote do
+      object unquote(String.to_atom("#{e[:name]}_queries")) do
+        (unquote_splicing(
+           List.flatten([
+             graphql_query_find_by_id(e, schema),
+             graphql_query_find_by_unique_fields(e, schema)
+           ])
+         ))
+      end
+    end
+  end
+
+  defp multiple_graphql_queries(e, schema) do
+    quote do
+      object unquote(String.to_atom("#{e[:plural]}_queries")) do
+        (unquote_splicing(
+           List.flatten([
+             graphql_query_list_all(e, schema),
+             graphql_query_find_by_parent_types(e, schema)
+           ])
+         ))
+      end
+    end
   end
 
   defp graphql_query_list_all(e, _schema) do
     quote do
       @desc "List all " <> unquote("#{e[:plural_display_name]}")
-      field unquote(e[:plural]), list_of(unquote(e[:name])) do
+      field :all, list_of(unquote(e[:name])) do
         resolve(&unquote(e[:resolver_module]).list_all/3)
       end
     end
@@ -888,7 +944,7 @@ defmodule Graphism do
   defp graphql_query_find_by_id(e, _schema) do
     quote do
       @desc "Find a single " <> unquote("#{e[:display_name]}") <> " given its unique id"
-      field unquote(String.to_atom("#{e[:name]}_by_id")),
+      field :by_id,
             unquote(e[:name]) do
         arg(:id, non_null(:id))
         resolve(&unquote(e[:resolver_module]).get_by_id/3)
@@ -906,7 +962,7 @@ defmodule Graphism do
         @desc "Find a single " <>
                 unquote("#{e[:display_name]}") <>
                 " given its unique " <> unquote("#{attr[:name]}")
-        field unquote(String.to_atom("#{e[:name]}_by_#{attr[:name]}")),
+        field unquote(String.to_atom("by_#{attr[:name]}")),
               unquote(e[:name]) do
           arg(unquote(attr[:name]), non_null(unquote(kind)))
 
@@ -926,7 +982,7 @@ defmodule Graphism do
         @desc "Find all " <>
                 unquote("#{e[:plural_display_name]}") <>
                 " given their parent " <> unquote("#{rel[:target]}")
-        field unquote(String.to_atom("#{e[:plural]}_by_#{rel[:name]}")),
+        field unquote(String.to_atom("by_#{rel[:name]}")),
               list_of(unquote(e[:name])) do
           arg(unquote(rel[:name]), non_null(:id))
 
@@ -939,19 +995,23 @@ defmodule Graphism do
   end
 
   defp graphql_mutations(e, schema) do
-    [
-      graphql_create_mutation(e, schema),
-      graphql_update_mutation(e, schema),
-      graphql_delete_mutation(e, schema)
-    ]
+    quote do
+      object unquote(String.to_atom("#{e[:name]}_mutations")) do
+        (unquote_splicing(
+           List.flatten([
+             graphql_create_mutation(e, schema),
+             graphql_update_mutation(e, schema),
+             graphql_delete_mutation(e, schema)
+           ])
+         ))
+      end
+    end
   end
 
   defp graphql_create_mutation(e, _schema) do
-    mutation_name = String.to_atom("create_#{e[:name]}")
-
     quote do
       @desc unquote("Create a new #{e[:display_name]}")
-      field unquote(mutation_name), non_null(unquote(e[:name])) do
+      field :create, non_null(unquote(e[:name])) do
         unquote_splicing(
           (e[:attributes]
            |> Enum.filter(fn attr -> attr[:name] != :id end)
@@ -977,11 +1037,9 @@ defmodule Graphism do
   end
 
   defp graphql_update_mutation(e, _schema) do
-    mutation_name = String.to_atom("update_#{e[:name]}")
-
     quote do
       @desc unquote("Update an existing #{e[:display_name]}")
-      field unquote(mutation_name), non_null(unquote(e[:name])) do
+      field :update, non_null(unquote(e[:name])) do
         unquote_splicing(
           Enum.map(e[:attributes], fn attr ->
             quote do
@@ -1003,11 +1061,9 @@ defmodule Graphism do
   end
 
   defp graphql_delete_mutation(e, _schema) do
-    mutation_name = String.to_atom("delete_#{e[:name]}")
-
     quote do
       @desc "Delete an existing " <> unquote("#{e[:display_name]}")
-      field unquote(mutation_name), unquote(e[:name]) do
+      field :delete, unquote(e[:name]) do
         arg(:id, non_null(:id))
         resolve(&unquote(e[:resolver_module]).delete/3)
       end
