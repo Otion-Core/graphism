@@ -1014,7 +1014,10 @@ defmodule Graphism do
       field :create, non_null(unquote(e[:name])) do
         unquote_splicing(
           (e[:attributes]
-           |> Enum.filter(fn attr -> attr[:name] != :id end)
+           |> Enum.reject(fn attr -> attr[:name] == :id end)
+           |> Enum.reject(fn attr ->
+             Enum.member?(attr[:opts][:modifiers] || [], :readonly)
+           end)
            |> Enum.map(fn attr ->
              kind = attr_graphql_type(e, attr)
 
@@ -1041,11 +1044,15 @@ defmodule Graphism do
       @desc unquote("Update an existing #{e[:display_name]}")
       field :update, non_null(unquote(e[:name])) do
         unquote_splicing(
-          Enum.map(e[:attributes], fn attr ->
-            quote do
-              arg(unquote(attr[:name]), non_null(unquote(attr[:kind])))
-            end
-          end) ++
+          (e[:attributes]
+           |> Enum.reject(fn attr ->
+             Enum.member?(attr[:opts][:modifiers] || [], :readonly)
+           end)
+           |> Enum.map(fn attr ->
+             quote do
+               arg(unquote(attr[:name]), non_null(unquote(attr[:kind])))
+             end
+           end)) ++
             (e[:relations]
              |> Enum.filter(fn rel -> :belongs_to == rel[:kind] || :has_one == rel[:kind] end)
              |> Enum.map(fn rel ->
