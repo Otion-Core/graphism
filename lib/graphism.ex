@@ -156,27 +156,36 @@ defmodule Graphism do
       Enum.flat_map(schema, fn e ->
         [single_graphql_queries(e, schema), multiple_graphql_queries(e, schema)]
       end)
+      |> Enum.reject(fn queries -> queries == nil end)
 
     queries =
       quote do
         query do
           (unquote_splicing(
-             Enum.flat_map(schema, fn e ->
-               [
-                 quote do
-                   field unquote(String.to_atom("#{e[:plural]}")),
-                         non_null(unquote(String.to_atom("#{e[:plural]}_queries"))) do
-                     resolve(&Resolver.Self.itself/3)
-                   end
-                 end,
-                 quote do
-                   field unquote(String.to_atom("#{e[:name]}")),
-                         non_null(unquote(String.to_atom("#{e[:name]}_queries"))) do
-                     resolve(&Resolver.Self.itself/3)
-                   end
-                 end
-               ]
-             end)
+             Enum.flat_map(
+               schema,
+               fn e ->
+                 [
+                   if_entity_action(e, :read, fn ->
+                     quote do
+                       field unquote(String.to_atom("#{e[:plural]}")),
+                             non_null(unquote(String.to_atom("#{e[:plural]}_queries"))) do
+                         resolve(&Resolver.Self.itself/3)
+                       end
+                     end
+                   end),
+                   if_entity_action(e, :list, fn ->
+                     quote do
+                       field unquote(String.to_atom("#{e[:name]}")),
+                             non_null(unquote(String.to_atom("#{e[:name]}_queries"))) do
+                         resolve(&Resolver.Self.itself/3)
+                       end
+                     end
+                   end)
+                 ]
+               end
+             )
+             |> without_nils()
            ))
         end
       end
@@ -218,20 +227,21 @@ defmodule Graphism do
     ])
   end
 
-  defmacro entity(name, _attrs \\ [], do: block) do
+  defmacro entity(name, opts \\ [], do: block) do
     caller_module = __CALLER__.module
 
     attrs = attributes_from(block)
     rels = relations_from(block)
 
     entity =
-      [name: name, attributes: attrs, relations: rels, enums: []]
+      [name: name, attributes: attrs, relations: rels, enums: [], opts: opts]
       |> with_plural()
       |> with_table_name()
       |> with_schema_module(caller_module)
       |> with_api_module(caller_module)
       |> with_resolver_module(caller_module)
       |> with_enums()
+      |> with_actions()
 
     Module.put_attribute(__CALLER__.module, :schema, entity)
 
@@ -251,6 +261,10 @@ defmodule Graphism do
   end
 
   defmacro belongs_to(_name, _opts \\ []) do
+  end
+
+  defp without_nils(enum) do
+    Enum.reject(enum, fn item -> item == nil end)
   end
 
   defp validate_attribute_name!(name) do
@@ -347,6 +361,23 @@ defmodule Graphism do
 
   defp enum_name(e, attr) do
     String.to_atom("#{e[:name]}_#{attr[:name]}s")
+  end
+
+  @default_entity_actions [:read, :list, :create, :update, :delete]
+
+  defp with_actions(e) do
+    actions = e[:opts][:actions] || @default_entity_actions
+    put_in(e, [:opts, :actions], actions)
+  end
+
+  defp if_entity_action(e, action, next) do
+    case supports_action(e, action) do
+      true ->
+        next.()
+
+      false ->
+        nil
+    end
   end
 
   # Resolves the given schema, by inspecting links between entities
@@ -502,6 +533,7 @@ defmodule Graphism do
 
         @required_fields unquote(
                            (e[:attributes]
+                            |> Enum.reject(&readonly?(&1))
                             |> Enum.map(fn attr ->
                               attr[:name]
                             end)) ++
@@ -906,29 +938,45 @@ defmodule Graphism do
     end)
   end
 
+  defp supports_action(e, action) do
+    Enum.member?(e[:opts][:actions], action)
+  end
+
   defp single_graphql_queries(e, schema) do
-    quote do
-      object unquote(String.to_atom("#{e[:name]}_queries")) do
-        (unquote_splicing(
-           List.flatten([
-             graphql_query_find_by_id(e, schema),
-             graphql_query_find_by_unique_fields(e, schema)
-           ])
-         ))
-      end
+    case supports_action(e, :read) do
+      true ->
+        quote do
+          object unquote(String.to_atom("#{e[:name]}_queries")) do
+            (unquote_splicing(
+               List.flatten([
+                 graphql_query_find_by_id(e, schema),
+                 graphql_query_find_by_unique_fields(e, schema)
+               ])
+             ))
+          end
+        end
+
+      false ->
+        nil
     end
   end
 
   defp multiple_graphql_queries(e, schema) do
-    quote do
-      object unquote(String.to_atom("#{e[:plural]}_queries")) do
-        (unquote_splicing(
-           List.flatten([
-             graphql_query_list_all(e, schema),
-             graphql_query_find_by_parent_types(e, schema)
-           ])
-         ))
-      end
+    case supports_action(e, :list) do
+      true ->
+        quote do
+          object unquote(String.to_atom("#{e[:plural]}_queries")) do
+            (unquote_splicing(
+               List.flatten([
+                 graphql_query_list_all(e, schema),
+                 graphql_query_find_by_parent_types(e, schema)
+               ])
+             ))
+          end
+        end
+
+      false ->
+        nil
     end
   end
 
@@ -1008,6 +1056,10 @@ defmodule Graphism do
     end
   end
 
+  defp readonly?(attr) do
+    Enum.member?(attr[:opts][:modifiers] || [], :readonly)
+  end
+
   defp graphql_create_mutation(e, _schema) do
     quote do
       @desc unquote("Create a new #{e[:display_name]}")
@@ -1015,9 +1067,7 @@ defmodule Graphism do
         unquote_splicing(
           (e[:attributes]
            |> Enum.reject(fn attr -> attr[:name] == :id end)
-           |> Enum.reject(fn attr ->
-             Enum.member?(attr[:opts][:modifiers] || [], :readonly)
-           end)
+           |> Enum.reject(&readonly?(&1))
            |> Enum.map(fn attr ->
              kind = attr_graphql_type(e, attr)
 
