@@ -34,11 +34,17 @@ defmodule Graphism.Migrations do
     write_migration(missing_migrations, last_migration_version + 1, dir: migrations_dir)
   end
 
+  defp virtual?(e) do
+    Enum.member?(e[:opts][:modifiers] || [], :virtual)
+  end
+
   defp migration_from_schema(schema) do
     # Index all entities, so that we can figure out foreign keys
     # using plurals and table names from referenced entities
     index =
-      Enum.reduce(schema, %{}, fn e, acc ->
+      schema
+      |> Enum.reject(&virtual?(&1))
+      |> Enum.reduce(%{}, fn e, acc ->
         Map.put(acc, e[:name], e)
       end)
 
@@ -807,6 +813,9 @@ defmodule Graphism.Migrations do
 
             :drop ->
               {m, -1000}
+
+            :alter ->
+              {m, 0}
           end
 
         :enum ->
