@@ -1382,7 +1382,7 @@ defmodule Graphism do
             nil ->
               opts
 
-            {:__aliases__, [line: 23], mod} ->
+            {:__aliases__, _, mod} ->
               Keyword.put(opts, :using, Module.concat(mod))
           end
 
