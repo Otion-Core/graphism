@@ -70,6 +70,26 @@ $ mix graphism.gen.migrations
 Do not forget to run `mix ecto.migrate` afterwards.
 
 
+## Schema Modifiers
+
+We have two types of modifiers. Entity modifiers and attribute modifiers. They both allow customizations in behaviour.
+
+### Entity modifiers
+
+| Modifier | Description |
+| --- | --- | 
+| `internal`   |  indicates the entity is persisted, but is not part of the graphql api |
+| `virtual` | indicates the entity is part of the graphql api, but is not persisted |
+
+### Attribute modifiers
+
+| Modifier | Description |
+| --- | --- | 
+| `optional`    |  indicates the attribute is optional (ie can be omitted in mutations, and will accept null values in the database) |
+| `writeonly`    | indicates the attribute is write only (can't be read) from the graphql api|
+| `readonly`    | indicates the attribute can only be read from the graphql api|
+
+
 ## Github Workflow :dna:
 Our commit convention follows [conventionalcommits.org](https://www.conventionalcommits.org) workflow.
 
