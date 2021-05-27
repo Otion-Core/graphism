@@ -413,8 +413,8 @@ defmodule Graphism do
     Enum.member?(entity[:opts][:modifiers] || [], :internal)
   end
 
-  defp secret?(attr) do
-    Enum.member?(attr[:opts][:modifiers] || [], :secret)
+  defp writeonly?(attr) do
+    Enum.member?(attr[:opts][:modifiers] || [], :writeonly)
   end
 
   # Resolves the given schema, by inspecting links between entities
@@ -1089,7 +1089,7 @@ defmodule Graphism do
         (unquote_splicing(
            # Add a field for each attribute.
            (e[:attributes]
-            |> Enum.reject(&secret?(&1))
+            |> Enum.reject(&writeonly?(&1))
             |> Enum.map(fn attr ->
               # determine the kind for this field, depending
               # on whether it is an enum or not

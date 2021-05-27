@@ -8,7 +8,10 @@ defmodule Graphism.ErrorMiddleware do
   defp handle_error(%Ecto.Changeset{} = changeset) do
     changeset
     |> Ecto.Changeset.traverse_errors(fn {err, _opts} -> err end)
-    |> Enum.map(fn {k, v} -> [message: v, field: k] end)
+    |> Enum.map(fn {k, v} ->
+      k = Inflex.camelize(k, :lower)
+      [message: v, field: k]
+    end)
   end
 
   defp handle_error(error), do: [error]
