@@ -957,23 +957,44 @@ defmodule Graphism do
     end)
   end
 
+  defp action_hooks(e, action, lifecycle) do
+    case e[:actions][action][lifecycle] do
+      nil ->
+        nil
+
+      mods ->
+        quote do
+          with {:ok, res} <- result do
+            (unquote_splicing(
+               Enum.map(mods, fn mod ->
+                 quote do
+                   unquote(mod).execute(res)
+                 end
+               end)
+             ))
+          end
+        end
+    end
+  end
+
   defp with_api_create_fun(funs, e, schema_module, repo_module) do
     with_entity_funs(funs, e, :create, fn ->
       fun_body =
         case virtual?(e) do
           true ->
             quote do
-              unquote(e[:actions][:create][:using]).execute(attrs)
+              result = unquote(e[:actions][:create][:using]).execute(attrs)
             end
 
           false ->
             quote do
-              with {:ok, e} <-
-                     %unquote(schema_module){}
-                     |> unquote(schema_module).changeset(attrs)
-                     |> unquote(repo_module).insert() do
-                get_by_id(e.id)
-              end
+              result =
+                with {:ok, e} <-
+                       %unquote(schema_module){}
+                       |> unquote(schema_module).changeset(attrs)
+                       |> unquote(repo_module).insert() do
+                  get_by_id(e.id)
+                end
             end
         end
 
@@ -1002,6 +1023,8 @@ defmodule Graphism do
           )
 
           unquote(fun_body)
+          unquote(action_hooks(e, :create, :after))
+          result
         end
       end
     end)
@@ -1036,12 +1059,16 @@ defmodule Graphism do
             end)
           )
 
-          with {:ok, unquote(Macro.var(e[:name], nil))} <-
-                 unquote(Macro.var(e[:name], nil))
-                 |> unquote(schema_module).changeset(attrs)
-                 |> unquote(repo_module).update() do
-            get_by_id(unquote(Macro.var(e[:name], nil)).id)
-          end
+          result =
+            with {:ok, unquote(Macro.var(e[:name], nil))} <-
+                   unquote(Macro.var(e[:name], nil))
+                   |> unquote(schema_module).changeset(attrs)
+                   |> unquote(repo_module).update() do
+              get_by_id(unquote(Macro.var(e[:name], nil)).id)
+            end
+
+          unquote(action_hooks(e, :update, :after))
+          result
         end
       end
     end)
@@ -1271,12 +1298,12 @@ defmodule Graphism do
 
   defp graphql_create_mutation(e, _schema) do
     return_type =
-      case e[:actions][:create] do
+      case e[:actions][:create][:produces] do
         nil ->
           e[:name]
 
-        opts ->
-          opts[:produces]
+        type ->
+          type
       end
 
     quote do
