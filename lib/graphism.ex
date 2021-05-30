@@ -389,7 +389,7 @@ defmodule Graphism do
       |> Enum.each(fn a ->
         action_spec = e[:actions][a]
 
-        unless action_spec && action_spec[:produces] && action_spec[:using] do
+        unless action_spec[:using] do
           raise "entity #{e[:name]} is virtual but does not define a spec for action #{a}"
         end
       end)
