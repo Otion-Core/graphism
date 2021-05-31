@@ -707,7 +707,7 @@ defmodule Graphism do
                    |> Enum.map(fn attr ->
                      quote do
                        {:ok, args} <-
-                         transform_arg(
+                         transform(
                            args,
                            unquote(attr[:name]),
                            unquote(attr[:opts][:transform])
@@ -749,46 +749,52 @@ defmodule Graphism do
         def create(_, args, %{context: context}) do
           unquote(
             with_auth(e, :create, fn ->
-              resolver_arg_transforms_block(e)
+              quote do
+                unquote(resolver_arg_transforms_block(e))
 
-              case Enum.filter(e[:relations], fn rel -> rel[:kind] == :belongs_to end) do
-                [] ->
-                  quote do
-                    # Generate an id for the new resource
-                    args
-                    |> Map.put(:id, Ecto.UUID.generate())
-                    |> unquote(api_module).create()
-                  end
-
-                rels ->
-                  quote do
-                    with unquote_splicing(
-                           rels
-                           |> Enum.map(fn rel ->
-                             parent_var = Macro.var(rel[:name], nil)
-                             target = find_entity!(schema, rel[:target])
-
-                             quote do
-                               {:ok, unquote(parent_var)} <-
-                                 unquote(target[:api_module]).get_by_id(args.unquote(rel[:name]))
-                             end
-                           end)
-                         ) do
-                      args =
+                unquote(
+                  case Enum.filter(e[:relations], fn rel -> rel[:kind] == :belongs_to end) do
+                    [] ->
+                      quote do
+                        # Generate an id for the new resource
                         args
-                        |> Map.drop(unquote(Enum.map(rels, fn rel -> rel[:name] end)))
                         |> Map.put(:id, Ecto.UUID.generate())
+                        |> unquote(api_module).create()
+                      end
 
-                      unquote(api_module).create(
-                        unquote_splicing(
-                          Enum.map(rels, fn rel ->
-                            Macro.var(rel[:name], nil)
-                          end)
-                        ),
-                        args
-                      )
-                    end
+                    rels ->
+                      quote do
+                        with unquote_splicing(
+                               rels
+                               |> Enum.map(fn rel ->
+                                 parent_var = Macro.var(rel[:name], nil)
+                                 target = find_entity!(schema, rel[:target])
+
+                                 quote do
+                                   {:ok, unquote(parent_var)} <-
+                                     unquote(target[:api_module]).get_by_id(
+                                       args.unquote(rel[:name])
+                                     )
+                                 end
+                               end)
+                             ) do
+                          args =
+                            args
+                            |> Map.drop(unquote(Enum.map(rels, fn rel -> rel[:name] end)))
+                            |> Map.put(:id, Ecto.UUID.generate())
+
+                          unquote(api_module).create(
+                            unquote_splicing(
+                              Enum.map(rels, fn rel ->
+                                Macro.var(rel[:name], nil)
+                              end)
+                            ),
+                            args
+                          )
+                        end
+                      end
                   end
+                )
               end
             end)
           )
@@ -803,9 +809,9 @@ defmodule Graphism do
         def update(_, %{id: id} = args, %{context: context}) do
           unquote(
             with_auth(e, :update, fn ->
-              resolver_arg_transforms_block(e)
-
               quote do
+                unquote(resolver_arg_transforms_block(e))
+
                 with {:ok, entity} <- unquote(api_module).get_by_id(id) do
                   args = Map.drop(args, [:id])
 
@@ -889,12 +895,13 @@ defmodule Graphism do
 
     quote do
       defmodule unquote(e[:resolver_module]) do
-        def transform_arg(args, arg_name, mod) do
+        defp transform(args, arg_name, mod) do
           case Map.fetch(args, arg_name) do
             :error ->
               args
 
             {:ok, v} ->
+              {:ok, v} = mod.execute(v)
               {:ok, Map.put(args, arg_name, v)}
           end
         end
