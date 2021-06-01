@@ -86,8 +86,8 @@ We have two types of modifiers. Entity modifiers and attribute modifiers. They b
 | Modifier | Description |
 | --- | --- | 
 | `optional`    |  indicates the attribute is optional (ie can be omitted in mutations, and will accept null values in the database) |
-| `writeonly`    | indicates the attribute is write only (can't be read) from the graphql api|
-| `readonly`    | indicates the attribute can only be read from the graphql api|
+| `private`    | indicates the attribute is private and can only be written from the graphql api|
+| `computed`    | indicates the attribute is computed and can only be read from the graphql api|
 
 
 ## Github Workflow :dna:
