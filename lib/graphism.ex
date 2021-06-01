@@ -416,8 +416,8 @@ defmodule Graphism do
     Enum.member?(entity[:opts][:modifiers] || [], :internal)
   end
 
-  defp writeonly?(attr) do
-    Enum.member?(attr[:opts][:modifiers] || [], :writeonly)
+  defp private?(attr) do
+    Enum.member?(attr[:opts][:modifiers] || [], :private)
   end
 
   # Resolves the given schema, by inspecting links between entities
@@ -573,7 +573,6 @@ defmodule Graphism do
 
         @required_fields unquote(
                            (e[:attributes]
-                            |> Enum.reject(&readonly?(&1))
                             |> Enum.reject(&optional?(&1))
                             |> Enum.map(fn attr ->
                               attr[:name]
@@ -724,7 +723,7 @@ defmodule Graphism do
   defp with_auth(e, action, fun) do
     case e[:actions][action][:allow] do
       nil ->
-        # for now we allow, but in the future we will deny 
+        # for now we allow, but in the future we will deny
         # by default
         fun.()
 
@@ -1006,8 +1005,20 @@ defmodule Graphism do
     end)
   end
 
-  defp action_hooks(e, action, lifecycle) do
-    case e[:actions][action][lifecycle] do
+  defp before_hook(e, action) do
+    case e[:actions][action][:before] do
+      nil ->
+        nil
+
+      mod ->
+        quote do
+          {:ok, attrs} = unquote(mod).execute(attrs)
+        end
+    end
+  end
+
+  defp after_hook(e, action) do
+    case e[:actions][action][:after] do
       nil ->
         nil
 
@@ -1065,8 +1076,9 @@ defmodule Graphism do
             end)
           )
 
+          unquote(before_hook(e, :create))
           unquote(fun_body)
-          unquote(action_hooks(e, :create, :after))
+          unquote(after_hook(e, :create))
           result
         end
       end
@@ -1075,18 +1087,8 @@ defmodule Graphism do
 
   defp with_api_update_fun(funs, e, schema_module, repo_module) do
     with_entity_funs(funs, e, :update, fn ->
-      quote do
-        def update(
-              unquote_splicing(
-                e[:relations]
-                |> Enum.filter(fn rel -> rel[:kind] == :belongs_to end)
-                |> Enum.map(fn rel ->
-                  Macro.var(rel[:name], nil)
-                end)
-              ),
-              unquote(Macro.var(e[:name], nil)),
-              attrs
-            ) do
+      fun_body =
+        quote do
           unquote_splicing(
             e[:relations]
             |> Enum.filter(fn rel -> rel[:kind] == :belongs_to end)
@@ -1109,8 +1111,23 @@ defmodule Graphism do
                    |> unquote(repo_module).update() do
               get_by_id(unquote(Macro.var(e[:name], nil)).id)
             end
+        end
 
-          unquote(action_hooks(e, :update, :after))
+      quote do
+        def update(
+              unquote_splicing(
+                e[:relations]
+                |> Enum.filter(fn rel -> rel[:kind] == :belongs_to end)
+                |> Enum.map(fn rel ->
+                  Macro.var(rel[:name], nil)
+                end)
+              ),
+              unquote(Macro.var(e[:name], nil)),
+              attrs
+            ) do
+          unquote(before_hook(e, :update))
+          unquote(fun_body)
+          unquote(after_hook(e, :update))
           result
         end
       end
@@ -1159,7 +1176,7 @@ defmodule Graphism do
         (unquote_splicing(
            # Add a field for each attribute.
            (e[:attributes]
-            |> Enum.reject(&writeonly?(&1))
+            |> Enum.reject(&private?(&1))
             |> Enum.map(fn attr ->
               # determine the kind for this field, depending
               # on whether it is an enum or not
@@ -1331,8 +1348,8 @@ defmodule Graphism do
     end
   end
 
-  defp readonly?(attr) do
-    Enum.member?(attr[:opts][:modifiers] || [], :readonly)
+  defp computed?(attr) do
+    Enum.member?(attr[:opts][:modifiers] || [], :computed)
   end
 
   defp optional?(attr) do
@@ -1361,7 +1378,7 @@ defmodule Graphism do
         unquote_splicing(
           (e[:attributes]
            |> Enum.reject(fn attr -> attr[:name] == :id end)
-           |> Enum.reject(&readonly?(&1))
+           |> Enum.reject(&computed?(&1))
            |> Enum.map(fn attr ->
              kind = attr_graphql_type(e, attr)
 
@@ -1408,7 +1425,7 @@ defmodule Graphism do
           ] ++
             (e[:attributes]
              |> Enum.reject(fn attr ->
-               attr[:name] == :id || Enum.member?(attr[:opts][:modifiers] || [], :readonly)
+               attr[:name] == :id || computed?(attr)
              end)
              |> Enum.map(fn attr ->
                quote do
