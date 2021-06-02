@@ -160,7 +160,7 @@ defmodule Graphism do
       Enum.flat_map(schema, fn e ->
         [single_graphql_queries(e, schema), multiple_graphql_queries(e, schema)]
       end)
-      |> Enum.reject(fn queries -> queries == nil end)
+      |> without_nils()
 
     queries =
       quote do
@@ -199,6 +199,7 @@ defmodule Graphism do
       |> Enum.map(fn e ->
         graphql_mutations(e, schema)
       end)
+      |> without_nils()
 
     mutations =
       quote do
@@ -207,13 +208,20 @@ defmodule Graphism do
              schema
              |> Enum.reject(&internal?(&1))
              |> Enum.map(fn e ->
-               quote do
-                 field unquote(String.to_atom("#{e[:name]}")),
-                       non_null(unquote(String.to_atom("#{e[:name]}_mutations"))) do
-                   resolve(&Resolver.Self.itself/3)
-                 end
+               case mutations?(e) do
+                 true ->
+                   quote do
+                     field unquote(String.to_atom("#{e[:name]}")),
+                           non_null(unquote(String.to_atom("#{e[:name]}_mutations"))) do
+                       resolve(&Resolver.Self.itself/3)
+                     end
+                   end
+
+                 false ->
+                   nil
                end
              end)
+             |> without_nils()
            ))
         end
       end
@@ -259,8 +267,6 @@ defmodule Graphism do
       |> with_api_module(caller_module)
       |> with_resolver_module(caller_module)
       |> with_enums()
-      |> with_supported_actions()
-      |> check_actions!()
 
     Module.put_attribute(__CALLER__.module, :schema, entity)
 
@@ -385,28 +391,6 @@ defmodule Graphism do
     String.to_atom("#{e[:name]}_#{attr[:name]}s")
   end
 
-  @default_entity_actions [:read, :list, :create, :update, :delete]
-
-  defp with_supported_actions(e) do
-    actions = e[:opts][:actions] || @default_entity_actions
-    put_in(e, [:opts, :actions], actions)
-  end
-
-  defp check_actions!(e) do
-    if virtual?(e) do
-      e[:opts][:actions]
-      |> Enum.each(fn a ->
-        action_spec = e[:actions][a]
-
-        unless action_spec[:using] do
-          raise "entity #{e[:name]} is virtual but does not define a spec for action #{a}"
-        end
-      end)
-    end
-
-    e
-  end
-
   defp if_entity_action(e, action, next) do
     case action?(e, action) do
       true ->
@@ -423,8 +407,10 @@ defmodule Graphism do
     end)
   end
 
+  @built_in_actions [:read, :list, :create, :update, :delete]
+
   defp built_in_action?(name) do
-    name == :create || name == :update || name == :delete
+    Enum.member?(@built_in_actions, name)
   end
 
   defp virtual?(entity) do
@@ -663,8 +649,14 @@ defmodule Graphism do
     with_entity_funs(funs, e, :read, fn ->
       [
         quote do
-          def get_by_id(_, %{id: id}, _) do
-            unquote(api_module).get_by_id(id)
+          def get_by_id(_, %{id: id} = args, %{context: context}) do
+            unquote(
+              with_auth(e, :read, fn ->
+                quote do
+                  unquote(api_module).get_by_id(id)
+                end
+              end)
+            )
           end
         end
         | e[:attributes]
@@ -673,10 +665,16 @@ defmodule Graphism do
             quote do
               def unquote(String.to_atom("get_by_#{attr[:name]}"))(
                     _,
-                    %{unquote(attr[:name]) => arg},
-                    _
+                    %{unquote(attr[:name]) => arg} = args,
+                    %{context: context}
                   ) do
-                unquote(api_module).unquote(String.to_atom("get_by_#{attr[:name]}"))(arg)
+                unquote(
+                  with_auth(e, :read, fn ->
+                    quote do
+                      unquote(api_module).unquote(String.to_atom("get_by_#{attr[:name]}"))(arg)
+                    end
+                  end)
+                )
               end
             end
           end)
@@ -688,8 +686,14 @@ defmodule Graphism do
     with_entity_funs(funs, e, :list, fn ->
       [
         quote do
-          def list_all(_, _, _) do
-            {:ok, unquote(api_module).list()}
+          def list_all(_, args, %{context: context}) do
+            unquote(
+              with_auth(e, :list, fn ->
+                quote do
+                  {:ok, unquote(api_module).list()}
+                end
+              end)
+            )
           end
         end
         | e[:relations]
@@ -698,10 +702,17 @@ defmodule Graphism do
             quote do
               def unquote(String.to_atom("list_by_#{rel[:name]}"))(
                     _,
-                    %{unquote(rel[:name]) => arg},
-                    _
+                    %{unquote(rel[:name]) => arg} = args,
+                    %{context: context}
                   ) do
-                {:ok, unquote(api_module).unquote(String.to_atom("list_by_#{rel[:name]}"))(arg)}
+                unquote(
+                  with_auth(e, :list, fn ->
+                    quote do
+                      {:ok,
+                       unquote(api_module).unquote(String.to_atom("list_by_#{rel[:name]}"))(arg)}
+                    end
+                  end)
+                )
               end
             end
           end)
@@ -931,77 +942,73 @@ defmodule Graphism do
   end
 
   defp with_api_list_funs(funs, e, schema_module, repo_module) do
-    with_entity_funs(funs, e, :list, fn ->
-      [
-        quote do
-          def list do
-            unquote(schema_module)
-            |> unquote(repo_module).all()
-          end
+    [
+      quote do
+        def list do
+          unquote(schema_module)
+          |> unquote(repo_module).all()
         end
-        | e[:relations]
-          |> Enum.filter(fn rel -> rel[:kind] == :belongs_to end)
-          |> Enum.map(fn rel ->
-            quote do
-              def unquote(String.to_atom("list_by_#{rel[:name]}"))(id) do
-                query =
-                  from(unquote(Macro.var(rel[:name], nil)) in unquote(schema_module),
-                    where:
-                      unquote(Macro.var(rel[:name], nil)).unquote(
-                        String.to_atom("#{rel[:name]}_id")
-                      ) == ^id
-                  )
+      end
+      | e[:relations]
+        |> Enum.filter(fn rel -> rel[:kind] == :belongs_to end)
+        |> Enum.map(fn rel ->
+          quote do
+            def unquote(String.to_atom("list_by_#{rel[:name]}"))(id) do
+              query =
+                from(unquote(Macro.var(rel[:name], nil)) in unquote(schema_module),
+                  where:
+                    unquote(Macro.var(rel[:name], nil)).unquote(
+                      String.to_atom("#{rel[:name]}_id")
+                    ) == ^id
+                )
 
-                unquote(repo_module).all(query)
-              end
+              unquote(repo_module).all(query)
             end
-          end)
-      ]
-    end)
+          end
+        end)
+    ] ++ funs
   end
 
   defp with_api_read_funs(funs, e, schema_module, repo_module) do
-    with_entity_funs(funs, e, :read, fn ->
-      [
-        quote do
-          def get_by_id(id) do
-            case unquote(schema_module)
-                 |> unquote(repo_module).get(id) do
-              nil ->
-                {:error, :not_found}
+    [
+      quote do
+        def get_by_id(id) do
+          case unquote(schema_module)
+               |> unquote(repo_module).get(id) do
+            nil ->
+              {:error, :not_found}
 
-              e ->
-                {:ok, e}
-            end
+            e ->
+              {:ok, e}
           end
         end
-        | e[:attributes]
-          |> Enum.filter(fn attr -> attr[:opts][:unique] end)
-          |> Enum.map(fn attr ->
-            quote do
-              def unquote(String.to_atom("get_by_#{attr[:name]}"))(value) do
-                value =
-                  case is_atom(value) do
-                    true ->
-                      "#{value}"
+      end
+      | e[:attributes]
+        |> Enum.filter(fn attr -> attr[:opts][:unique] end)
+        |> Enum.map(fn attr ->
+          quote do
+            def unquote(String.to_atom("get_by_#{attr[:name]}"))(value) do
+              value =
+                case is_atom(value) do
+                  true ->
+                    "#{value}"
 
-                    false ->
-                      value
-                  end
-
-                case unquote(schema_module)
-                     |> unquote(repo_module).get_by([{unquote(attr[:name]), value}]) do
-                  nil ->
-                    {:error, :not_found}
-
-                  e ->
-                    {:ok, e}
+                  false ->
+                    value
                 end
+
+              case unquote(schema_module)
+                   |> unquote(repo_module).get_by([{unquote(attr[:name]), value}]) do
+                nil ->
+                  {:error, :not_found}
+
+                e ->
+                  {:ok, e}
               end
             end
-          end)
-      ]
-    end)
+          end
+        end)
+    ] ++ funs
   end
 
   defp before_hook(e, action) do
@@ -1039,26 +1046,26 @@ defmodule Graphism do
   end
 
   defp with_api_create_fun(funs, e, schema_module, repo_module) do
-    with_entity_funs(funs, e, :create, fn ->
-      fun_body =
-        case virtual?(e) do
-          true ->
-            quote do
-              result = unquote(e[:actions][:create][:using]).execute(attrs)
-            end
+    fun_body =
+      case virtual?(e) do
+        true ->
+          quote do
+            result = unquote(e[:actions][:create][:using]).execute(attrs)
+          end
 
-          false ->
-            quote do
-              result =
-                with {:ok, e} <-
-                       %unquote(schema_module){}
-                       |> unquote(schema_module).changeset(attrs)
-                       |> unquote(repo_module).insert() do
-                  get_by_id(e.id)
-                end
-            end
-        end
+        false ->
+          quote do
+            result =
+              with {:ok, e} <-
+                     %unquote(schema_module){}
+                     |> unquote(schema_module).changeset(attrs)
+                     |> unquote(repo_module).insert() do
+                get_by_id(e.id)
+              end
+          end
+      end
 
+    [
       quote do
         def create(
               unquote_splicing(
@@ -1089,37 +1096,38 @@ defmodule Graphism do
           result
         end
       end
-    end)
+      | funs
+    ]
   end
 
   defp with_api_update_fun(funs, e, schema_module, repo_module) do
-    with_entity_funs(funs, e, :update, fn ->
-      fun_body =
-        quote do
-          unquote_splicing(
-            e[:relations]
-            |> Enum.filter(fn rel -> rel[:kind] == :belongs_to end)
-            |> Enum.map(fn rel ->
-              quote do
-                attrs =
-                  attrs
-                  |> Map.put(
-                    unquote(String.to_atom("#{rel[:name]}_id")),
-                    unquote(Macro.var(rel[:name], nil)).id
-                  )
-              end
-            end)
-          )
-
-          result =
-            with {:ok, unquote(Macro.var(e[:name], nil))} <-
-                   unquote(Macro.var(e[:name], nil))
-                   |> unquote(schema_module).changeset(attrs)
-                   |> unquote(repo_module).update() do
-              get_by_id(unquote(Macro.var(e[:name], nil)).id)
+    fun_body =
+      quote do
+        unquote_splicing(
+          e[:relations]
+          |> Enum.filter(fn rel -> rel[:kind] == :belongs_to end)
+          |> Enum.map(fn rel ->
+            quote do
+              attrs =
+                attrs
+                |> Map.put(
+                  unquote(String.to_atom("#{rel[:name]}_id")),
+                  unquote(Macro.var(rel[:name], nil)).id
+                )
             end
-        end
+          end)
+        )
 
+        result =
+          with {:ok, unquote(Macro.var(e[:name], nil))} <-
+                 unquote(Macro.var(e[:name], nil))
+                 |> unquote(schema_module).changeset(attrs)
+                 |> unquote(repo_module).update() do
+            get_by_id(unquote(Macro.var(e[:name], nil)).id)
+          end
+      end
+
+    [
       quote do
         def update(
               unquote_splicing(
@@ -1138,17 +1146,19 @@ defmodule Graphism do
           result
         end
       end
-    end)
+      | funs
+    ]
   end
 
-  defp with_api_delete_fun(funs, e, schema_module, repo_module) do
-    with_entity_funs(funs, e, :delete, fn ->
+  defp with_api_delete_fun(funs, _e, schema_module, repo_module) do
+    [
       quote do
         def delete(%unquote(schema_module){} = e) do
           unquote(repo_module).delete(e)
         end
       end
-    end)
+      | funs
+    ]
   end
 
   defp with_api_custom_funs(funs, e, schema_module, repo_module) do
@@ -1277,8 +1287,30 @@ defmodule Graphism do
     end)
   end
 
+  @readonly_actions [:read, :list]
+
+  defp readonly_action?(name) do
+    Enum.member?(@readonly_actions, name)
+  end
+
+  defp action_names(e) do
+    (e[:actions] ++ e[:custom_actions])
+    |> Enum.map(fn {name, _} -> name end)
+  end
+
+  defp mutations?(e) do
+    e
+    |> action_names()
+    |> Enum.reject(&readonly_action?(&1))
+    |> Enum.count() > 0
+  end
+
   defp action?(e, action) do
-    Enum.member?(e[:opts][:actions], action)
+    e
+    |> action_names()
+    |> Enum.find(fn name ->
+      action == name
+    end) != nil
   end
 
   defp single_graphql_queries(e, schema) do
@@ -1382,19 +1414,25 @@ defmodule Graphism do
   end
 
   defp graphql_mutations(e, schema) do
-    quote do
-      object unquote(String.to_atom("#{e[:name]}_mutations")) do
-        (unquote_splicing(
-           List.flatten(
-             [
-               if_entity_action(e, :create, fn -> graphql_create_mutation(e, schema) end),
-               if_entity_action(e, :update, fn -> graphql_update_mutation(e, schema) end),
-               if_entity_action(e, :delete, fn -> graphql_delete_mutation(e, schema) end)
-             ] ++ graphql_custom_mutations(e, schema)
-           )
-           |> without_nils()
-         ))
-      end
+    case mutations?(e) do
+      false ->
+        nil
+
+      true ->
+        quote do
+          object unquote(String.to_atom("#{e[:name]}_mutations")) do
+            (unquote_splicing(
+               List.flatten(
+                 [
+                   if_entity_action(e, :create, fn -> graphql_create_mutation(e, schema) end),
+                   if_entity_action(e, :update, fn -> graphql_update_mutation(e, schema) end),
+                   if_entity_action(e, :delete, fn -> graphql_delete_mutation(e, schema) end)
+                 ] ++ graphql_custom_mutations(e, schema)
+               )
+               |> without_nils()
+             ))
+          end
+        end
     end
   end
 
