@@ -170,7 +170,7 @@ defmodule Graphism do
              |> Enum.reject(&internal?(&1))
              |> Enum.flat_map(fn e ->
                [
-                 if_entity_action(e, :read, fn ->
+                 with_entity_action(e, :read, fn _ ->
                    quote do
                      field unquote(String.to_atom("#{e[:plural]}")),
                            non_null(unquote(String.to_atom("#{e[:plural]}_queries"))) do
@@ -178,7 +178,7 @@ defmodule Graphism do
                      end
                    end
                  end),
-                 if_entity_action(e, :list, fn ->
+                 with_entity_action(e, :list, fn _ ->
                    quote do
                      field unquote(String.to_atom("#{e[:name]}")),
                            non_null(unquote(String.to_atom("#{e[:name]}_queries"))) do
@@ -391,13 +391,13 @@ defmodule Graphism do
     String.to_atom("#{e[:name]}_#{attr[:name]}s")
   end
 
-  defp if_entity_action(e, action, next) do
-    case action?(e, action) do
-      true ->
-        next.()
-
-      false ->
+  defp with_entity_action(e, action, next) do
+    case action_for(e, action) do
+      nil ->
         nil
+
+      opts ->
+        next.(opts)
     end
   end
 
@@ -688,11 +688,11 @@ defmodule Graphism do
     with_entity_funs(funs, e, :list, fn ->
       [
         quote do
-          def list_all(_, args, %{context: context}) do
+          def list(_, args, %{context: context}) do
             unquote(
               with_auth(e, :list, fn ->
                 quote do
-                  {:ok, unquote(api_module).list()}
+                  {:ok, unquote(api_module).list(context)}
                 end
               end)
             )
@@ -711,7 +711,10 @@ defmodule Graphism do
                   with_auth(e, :list, fn ->
                     quote do
                       {:ok,
-                       unquote(api_module).unquote(String.to_atom("list_by_#{rel[:name]}"))(arg)}
+                       unquote(api_module).unquote(String.to_atom("list_by_#{rel[:name]}"))(
+                         arg,
+                         context
+                       )}
                     end
                   end)
                 )
@@ -943,19 +946,45 @@ defmodule Graphism do
     end
   end
 
+  defp with_entity_scope(e, action, fun) do
+    case action_for(e, action) do
+      nil ->
+        fun.()
+
+      opts ->
+        case opts[:scope] do
+          nil ->
+            fun.()
+
+          mod ->
+            quote do
+              query = unquote(mod).scope(query, context)
+              unquote(fun.())
+            end
+        end
+    end
+  end
+
   defp with_api_list_funs(funs, e, schema_module, repo_module) do
     [
       quote do
-        def list do
-          unquote(schema_module)
-          |> unquote(repo_module).all()
+        def list(context) do
+          query = unquote(schema_module)
+
+          unquote(
+            with_entity_scope(e, :list, fn ->
+              quote do
+                unquote(repo_module).all(query)
+              end
+            end)
+          )
         end
       end
       | e[:relations]
         |> Enum.filter(fn rel -> rel[:kind] == :belongs_to end)
         |> Enum.map(fn rel ->
           quote do
-            def unquote(String.to_atom("list_by_#{rel[:name]}"))(id) do
+            def unquote(String.to_atom("list_by_#{rel[:name]}"))(id, context) do
               query =
                 from(unquote(Macro.var(rel[:name], nil)) in unquote(schema_module),
                   where:
@@ -964,7 +993,13 @@ defmodule Graphism do
                     ) == ^id
                 )
 
-              unquote(repo_module).all(query)
+              unquote(
+                with_entity_scope(e, :list, fn ->
+                  quote do
+                    unquote(repo_module).all(query)
+                  end
+                end)
+              )
             end
           end
         end)
@@ -1323,6 +1358,15 @@ defmodule Graphism do
     end) != nil
   end
 
+  defp action_for(e, action) do
+    (e[:actions] ++ e[:custom_actions])
+    |> Enum.filter(fn {name, _} ->
+      name == action
+    end)
+    |> Enum.map(fn {_, opts} -> opts end)
+    |> List.first()
+  end
+
   defp single_graphql_queries(e, schema) do
     case action?(e, :read) do
       true ->
@@ -1365,7 +1409,7 @@ defmodule Graphism do
     quote do
       @desc "List all " <> unquote("#{e[:plural_display_name]}")
       field :all, list_of(unquote(e[:name])) do
-        resolve(&unquote(e[:resolver_module]).list_all/3)
+        resolve(&unquote(e[:resolver_module]).list/3)
       end
     end
   end
@@ -1434,9 +1478,9 @@ defmodule Graphism do
             (unquote_splicing(
                List.flatten(
                  [
-                   if_entity_action(e, :create, fn -> graphql_create_mutation(e, schema) end),
-                   if_entity_action(e, :update, fn -> graphql_update_mutation(e, schema) end),
-                   if_entity_action(e, :delete, fn -> graphql_delete_mutation(e, schema) end)
+                   with_entity_action(e, :create, fn _ -> graphql_create_mutation(e, schema) end),
+                   with_entity_action(e, :update, fn _ -> graphql_update_mutation(e, schema) end),
+                   with_entity_action(e, :delete, fn _ -> graphql_delete_mutation(e, schema) end)
                  ] ++ graphql_custom_mutations(e, schema)
                )
                |> without_nils()
