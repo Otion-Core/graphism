@@ -726,9 +726,7 @@ defmodule Graphism do
   end
 
   defp with_auth(e, action, fun) do
-    opts = e[:actions][action] || e[:custom_actions][action]
-
-    case opts[:allow] do
+    case action_for(e, action)[:allow] do
       nil ->
         # for now we allow, but in the future we will deny
         # by default
@@ -736,9 +734,48 @@ defmodule Graphism do
 
       mod ->
         quote do
-          simpler_context = Map.drop(context, [:__absinthe_plug__, :loader, :pubsub])
+          auth_context = Map.drop(context, [:__absinthe_plug__, :loader, :pubsub])
 
-          case unquote(mod).allow?(args, simpler_context) do
+          # Add all parent entities to the authorization context
+          # if we are mutating something
+          unquote_splicing(
+            case mutating_action?(action) do
+              true ->
+                e[:relations]
+                |> Enum.filter(fn rel -> rel[:kind] == :belongs_to end)
+                |> Enum.map(fn rel ->
+                  quote do
+                    auth_context =
+                      Map.put(
+                        auth_context,
+                        unquote(rel[:name]),
+                        unquote(Macro.var(rel[:name], nil))
+                      )
+                  end
+                end)
+
+              false ->
+                []
+            end
+          )
+
+          # if we are updating an entity, then put it also
+          # in the authorization context
+          unquote_splicing(
+            case action == :update do
+              true ->
+                [
+                  quote do
+                    auth_context = Map.put(auth_context, unquote(e[:name]), entity)
+                  end
+                ]
+
+              false ->
+                []
+            end
+          )
+
+          case unquote(mod).allow?(args, auth_context) do
             false ->
               {:error, :unauthorized}
 
@@ -754,39 +791,43 @@ defmodule Graphism do
       quote do
         def create(_, args, %{context: context}) do
           unquote(
-            with_auth(e, :create, fn ->
-              quote do
-                unquote(
-                  case Enum.filter(e[:relations], fn rel -> rel[:kind] == :belongs_to end) do
-                    [] ->
+            case Enum.filter(e[:relations], fn rel -> rel[:kind] == :belongs_to end) do
+              [] ->
+                quote do
+                  # Generate an id for the new resource
+                  args = Map.put(args, :id, Ecto.UUID.generate())
+
+                  unquote(
+                    with_auth(e, :create, fn ->
                       quote do
-                        # Generate an id for the new resource
-                        args
-                        |> Map.put(:id, Ecto.UUID.generate())
-                        |> unquote(api_module).create()
+                        unquote(api_module).create(args)
                       end
+                    end)
+                  )
+                end
 
-                    rels ->
-                      quote do
-                        with unquote_splicing(
-                               rels
-                               |> Enum.map(fn rel ->
-                                 parent_var = Macro.var(rel[:name], nil)
-                                 target = find_entity!(schema, rel[:target])
+              rels ->
+                quote do
+                  with unquote_splicing(
+                         rels
+                         |> Enum.map(fn rel ->
+                           parent_var = Macro.var(rel[:name], nil)
+                           target = find_entity!(schema, rel[:target])
 
-                                 quote do
-                                   {:ok, unquote(parent_var)} <-
-                                     unquote(target[:api_module]).get_by_id(
-                                       args.unquote(rel[:name])
-                                     )
-                                 end
-                               end)
-                             ) do
-                          args =
-                            args
-                            |> Map.drop(unquote(Enum.map(rels, fn rel -> rel[:name] end)))
-                            |> Map.put(:id, Ecto.UUID.generate())
+                           quote do
+                             {:ok, unquote(parent_var)} <-
+                               unquote(target[:api_module]).get_by_id(args.unquote(rel[:name]))
+                           end
+                         end)
+                       ) do
+                    args =
+                      args
+                      |> Map.drop(unquote(Enum.map(rels, fn rel -> rel[:name] end)))
+                      |> Map.put(:id, Ecto.UUID.generate())
 
+                    unquote(
+                      with_auth(e, :create, fn ->
+                        quote do
                           unquote(api_module).create(
                             unquote_splicing(
                               Enum.map(rels, fn rel ->
@@ -796,11 +837,11 @@ defmodule Graphism do
                             args
                           )
                         end
-                      end
+                      end)
+                    )
                   end
-                )
-              end
-            end)
+                end
+            end
           )
         end
       end
@@ -811,38 +852,37 @@ defmodule Graphism do
     with_entity_funs(funs, e, :update, fn ->
       quote do
         def update(_, %{id: id} = args, %{context: context}) do
-          unquote(
-            with_auth(e, :update, fn ->
-              quote do
-                with {:ok, entity} <- unquote(api_module).get_by_id(id) do
-                  args = Map.drop(args, [:id])
+          with {:ok, entity} <- unquote(api_module).get_by_id(id) do
+            args = Map.drop(args, [:id])
 
-                  unquote(
-                    case Enum.filter(e[:relations], fn rel -> rel[:kind] == :belongs_to end) do
-                      [] ->
-                        quote do
-                          unquote(api_module).update(entity, args)
-                        end
+            unquote(
+              case Enum.filter(e[:relations], fn rel -> rel[:kind] == :belongs_to end) do
+                [] ->
+                  with_auth(e, :update, fn ->
+                    quote do
+                      unquote(api_module).update(entity, args)
+                    end
+                  end)
 
-                      rels ->
-                        quote do
-                          with unquote_splicing(
-                                 rels
-                                 |> Enum.map(fn rel ->
-                                   parent_var = Macro.var(rel[:name], nil)
-                                   target = find_entity!(schema, rel[:target])
+                rels ->
+                  quote do
+                    with unquote_splicing(
+                           rels
+                           |> Enum.map(fn rel ->
+                             parent_var = Macro.var(rel[:name], nil)
+                             target = find_entity!(schema, rel[:target])
 
-                                   quote do
-                                     {:ok, unquote(parent_var)} <-
-                                       unquote(target[:api_module]).get_by_id(
-                                         args.unquote(rel[:name])
-                                       )
-                                   end
-                                 end)
-                               ) do
-                            args =
-                              Map.drop(args, unquote(Enum.map(rels, fn rel -> rel[:name] end)))
+                             quote do
+                               {:ok, unquote(parent_var)} <-
+                                 unquote(target[:api_module]).get_by_id(args.unquote(rel[:name]))
+                             end
+                           end)
+                         ) do
+                      args = Map.drop(args, unquote(Enum.map(rels, fn rel -> rel[:name] end)))
 
+                      unquote(
+                        with_auth(e, :update, fn ->
+                          quote do
                             unquote(api_module).update(
                               unquote_splicing(
                                 Enum.map(rels, fn rel ->
@@ -853,13 +893,13 @@ defmodule Graphism do
                               args
                             )
                           end
-                        end
+                        end)
+                      )
                     end
-                  )
-                end
+                  end
               end
-            end)
-          )
+            )
+          end
         end
       end
     end)
@@ -1336,6 +1376,11 @@ defmodule Graphism do
 
   defp readonly_action?(name) do
     Enum.member?(@readonly_actions, name)
+  end
+
+  defp mutating_action?(name) do
+    name != :delete &&
+      !readonly_action?(name)
   end
 
   defp action_names(e) do
