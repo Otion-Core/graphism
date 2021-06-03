@@ -650,13 +650,15 @@ defmodule Graphism do
       [
         quote do
           def get_by_id(_, %{id: id} = args, %{context: context}) do
-            unquote(
-              with_auth(e, :read, fn ->
-                quote do
-                  unquote(api_module).get_by_id(id)
-                end
-              end)
-            )
+            with {:ok, args} = res <- unquote(api_module).get_by_id(id) do
+              unquote(
+                with_auth(e, :read, fn ->
+                  quote do
+                    res
+                  end
+                end)
+              )
+            end
           end
         end
         | e[:attributes]
@@ -969,12 +971,19 @@ defmodule Graphism do
     ] ++ funs
   end
 
+  defp entity_read_preloads(e) do
+    e[:relations]
+    |> Enum.filter(fn rel -> rel[:kind] == :belongs_to end)
+    |> Enum.map(fn rel -> rel[:name] end)
+  end
+
   defp with_api_read_funs(funs, e, schema_module, repo_module) do
     [
       quote do
         def get_by_id(id) do
           case unquote(schema_module)
-               |> unquote(repo_module).get(id) do
+               |> unquote(repo_module).get(id)
+               |> unquote(repo_module).preload(unquote(entity_read_preloads(e))) do
             nil ->
               {:error, :not_found}
 
@@ -998,7 +1007,8 @@ defmodule Graphism do
                 end
 
               case unquote(schema_module)
-                   |> unquote(repo_module).get_by([{unquote(attr[:name]), value}]) do
+                   |> unquote(repo_module).get_by([{unquote(attr[:name]), value}])
+                   |> unquote(repo_module).preload(unquote(entity_read_preloads(e))) do
                 nil ->
                   {:error, :not_found}
 
