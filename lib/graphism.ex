@@ -645,18 +645,23 @@ defmodule Graphism do
     end
   end
 
-  defp with_resolver_read_funs(funs, e, _schema, api_module) do
+  defp with_resolver_read_funs(funs, e, schema, api_module) do
     with_entity_funs(funs, e, :read, fn ->
       [
         quote do
           def get_by_id(_, %{id: id} = args, %{context: context}) do
             with {:ok, args} = res <- unquote(api_module).get_by_id(id) do
               unquote(
-                with_auth(e, :read, fn ->
-                  quote do
-                    res
+                with_auth(
+                  e,
+                  :read,
+                  schema,
+                  fn ->
+                    quote do
+                      res
+                    end
                   end
-                end)
+                )
               )
             end
           end
@@ -671,7 +676,7 @@ defmodule Graphism do
                     %{context: context}
                   ) do
                 unquote(
-                  with_auth(e, :read, fn ->
+                  with_auth(e, :read, schema, fn ->
                     quote do
                       unquote(api_module).unquote(String.to_atom("get_by_#{attr[:name]}"))(arg)
                     end
@@ -684,13 +689,13 @@ defmodule Graphism do
     end)
   end
 
-  defp with_resolver_list_funs(funs, e, _schema, api_module) do
+  defp with_resolver_list_funs(funs, e, schema, api_module) do
     with_entity_funs(funs, e, :list, fn ->
       [
         quote do
           def list(_, args, %{context: context}) do
             unquote(
-              with_auth(e, :list, fn ->
+              with_auth(e, :list, schema, fn ->
                 quote do
                   {:ok, unquote(api_module).list(context)}
                 end
@@ -708,7 +713,7 @@ defmodule Graphism do
                     %{context: context}
                   ) do
                 unquote(
-                  with_auth(e, :list, fn ->
+                  with_auth(e, :list, schema, fn ->
                     quote do
                       {:ok,
                        unquote(api_module).unquote(String.to_atom("list_by_#{rel[:name]}"))(
@@ -725,7 +730,30 @@ defmodule Graphism do
     end)
   end
 
-  defp with_auth(e, action, fun) do
+  defp entity_ancestor_auth_context(e, schema, context_var) do
+    e[:relations]
+    |> Enum.filter(fn rel -> rel[:kind] == :belongs_to end)
+    |> Enum.flat_map(fn rel ->
+      target = find_entity!(schema, rel[:target])
+      parent_context_var = Macro.var(target[:name], nil)
+
+      [
+        quote do
+          unquote(parent_context_var) = unquote(context_var).unquote(rel[:name])
+
+          auth_context =
+            Map.put(
+              auth_context,
+              unquote(target[:name]),
+              unquote(parent_context_var)
+            )
+        end
+        | entity_ancestor_auth_context(target, schema, parent_context_var)
+      ]
+    end)
+  end
+
+  defp with_auth(e, action, schema, fun) do
     case action_for(e, action)[:allow] do
       nil ->
         # for now we allow, but in the future we will deny
@@ -733,56 +761,71 @@ defmodule Graphism do
         fun.()
 
       mod ->
-        quote do
-          auth_context = Map.drop(context, [:__absinthe_plug__, :loader, :pubsub])
+        ast =
+          quote do
+            auth_context = Map.drop(context, [:__absinthe_plug__, :loader, :pubsub])
 
-          # Add all parent entities to the authorization context
-          # if we are mutating something
-          unquote_splicing(
-            case mutating_action?(action) do
-              true ->
-                e[:relations]
-                |> Enum.filter(fn rel -> rel[:kind] == :belongs_to end)
-                |> Enum.map(fn rel ->
-                  quote do
-                    auth_context =
-                      Map.put(
-                        auth_context,
-                        unquote(rel[:name]),
-                        unquote(Macro.var(rel[:name], nil))
-                      )
-                  end
-                end)
+            # Add all parent entities to the authorization context
+            # if we are mutating something
+            unquote_splicing(
+              case mutating_action?(action) do
+                true ->
+                  e[:relations]
+                  |> Enum.filter(fn rel -> rel[:kind] == :belongs_to end)
+                  |> Enum.flat_map(fn rel ->
+                    target = find_entity!(schema, rel[:target])
+                    context_var = Macro.var(rel[:name], nil)
 
+                    [
+                      quote do
+                        auth_context =
+                          Map.put(
+                            auth_context,
+                            unquote(target[:name]),
+                            unquote(context_var)
+                          )
+                      end
+                      | entity_ancestor_auth_context(target, schema, context_var)
+                    ]
+                  end)
+
+                false ->
+                  []
+              end
+            )
+
+            # if we are updating an entity, then put it also
+            # in the authorization context
+            unquote_splicing(
+              case action == :update do
+                true ->
+                  [
+                    quote do
+                      auth_context = Map.put(auth_context, unquote(e[:name]), entity)
+                    end
+                  ]
+
+                false ->
+                  []
+              end
+            )
+
+            case unquote(mod).allow?(args, auth_context) do
               false ->
-                []
-            end
-          )
+                {:error, :unauthorized}
 
-          # if we are updating an entity, then put it also
-          # in the authorization context
-          unquote_splicing(
-            case action == :update do
               true ->
-                [
-                  quote do
-                    auth_context = Map.put(auth_context, unquote(e[:name]), entity)
-                  end
-                ]
-
-              false ->
-                []
+                unquote(fun.())
             end
-          )
-
-          case unquote(mod).allow?(args, auth_context) do
-            false ->
-              {:error, :unauthorized}
-
-            true ->
-              unquote(fun.())
           end
-        end
+
+        IO.puts(
+          ast
+          |> Macro.to_string()
+          |> Code.format_string!()
+        )
+
+        ast
     end
   end
 
@@ -798,7 +841,7 @@ defmodule Graphism do
                   args = Map.put(args, :id, Ecto.UUID.generate())
 
                   unquote(
-                    with_auth(e, :create, fn ->
+                    with_auth(e, :create, schema, fn ->
                       quote do
                         unquote(api_module).create(args)
                       end
@@ -826,7 +869,7 @@ defmodule Graphism do
                       |> Map.put(:id, Ecto.UUID.generate())
 
                     unquote(
-                      with_auth(e, :create, fn ->
+                      with_auth(e, :create, schema, fn ->
                         quote do
                           unquote(api_module).create(
                             unquote_splicing(
@@ -858,7 +901,7 @@ defmodule Graphism do
             unquote(
               case Enum.filter(e[:relations], fn rel -> rel[:kind] == :belongs_to end) do
                 [] ->
-                  with_auth(e, :update, fn ->
+                  with_auth(e, :update, schema, fn ->
                     quote do
                       unquote(api_module).update(entity, args)
                     end
@@ -881,7 +924,7 @@ defmodule Graphism do
                       args = Map.drop(args, unquote(Enum.map(rels, fn rel -> rel[:name] end)))
 
                       unquote(
-                        with_auth(e, :update, fn ->
+                        with_auth(e, :update, schema, fn ->
                           quote do
                             unquote(api_module).update(
                               unquote_splicing(
@@ -905,12 +948,12 @@ defmodule Graphism do
     end)
   end
 
-  defp with_resolver_delete_fun(funs, e, _schema, api_module) do
+  defp with_resolver_delete_fun(funs, e, schema, api_module) do
     with_entity_funs(funs, e, :delete, fn ->
       quote do
         def delete(_, %{id: id} = args, %{context: context}) do
           unquote(
-            with_auth(e, :delete, fn ->
+            with_auth(e, :delete, schema, fn ->
               quote do
                 with {:ok, entity} <- unquote(api_module).get_by_id(id) do
                   unquote(api_module).delete(entity)
@@ -923,17 +966,17 @@ defmodule Graphism do
     end)
   end
 
-  defp with_resolver_custom_funs(funs, e, _schema, api_module) do
+  defp with_resolver_custom_funs(funs, e, schema, api_module) do
     Enum.map(e[:custom_actions], fn {action, opts} ->
-      resolver_custom_fun(e, action, opts, api_module)
+      resolver_custom_fun(e, action, opts, api_module, schema)
     end) ++ funs
   end
 
-  defp resolver_custom_fun(e, action, _opts, api_module) do
+  defp resolver_custom_fun(e, action, _opts, api_module, schema) do
     quote do
       def unquote(action)(_, args, %{context: context}) do
         unquote(
-          with_auth(e, action, fn ->
+          with_auth(e, action, schema, fn ->
             quote do
               args = Map.put(args, :id, Ecto.UUID.generate())
               unquote(api_module).unquote(action)(args)
@@ -964,18 +1007,18 @@ defmodule Graphism do
     end
   end
 
-  defp api_module(e, _, opts) do
+  defp api_module(e, schema, opts) do
     schema_module = e[:schema_module]
     repo_module = opts[:repo]
 
     api_funs =
       []
-      |> with_api_list_funs(e, schema_module, repo_module)
-      |> with_api_read_funs(e, schema_module, repo_module)
-      |> with_api_create_fun(e, schema_module, repo_module)
-      |> with_api_update_fun(e, schema_module, repo_module)
-      |> with_api_delete_fun(e, schema_module, repo_module)
-      |> with_api_custom_funs(e, schema_module, repo_module)
+      |> with_api_list_funs(e, schema_module, repo_module, schema)
+      |> with_api_read_funs(e, schema_module, repo_module, schema)
+      |> with_api_create_fun(e, schema_module, repo_module, schema)
+      |> with_api_update_fun(e, schema_module, repo_module, schema)
+      |> with_api_delete_fun(e, schema_module, repo_module, schema)
+      |> with_api_custom_funs(e, schema_module, repo_module, schema)
       |> List.flatten()
 
     quote do
@@ -1005,7 +1048,7 @@ defmodule Graphism do
     end
   end
 
-  defp with_api_list_funs(funs, e, schema_module, repo_module) do
+  defp with_api_list_funs(funs, e, schema_module, repo_module, _schema \\ nil) do
     [
       quote do
         def list(context) do
@@ -1046,19 +1089,32 @@ defmodule Graphism do
     ] ++ funs
   end
 
-  defp entity_read_preloads(e) do
+  defp entity_read_preloads(e, schema) do
     e[:relations]
     |> Enum.filter(fn rel -> rel[:kind] == :belongs_to end)
-    |> Enum.map(fn rel -> rel[:name] end)
+    |> Enum.map(fn rel ->
+      target = find_entity!(schema, rel[:target])
+
+      # recursively resolve ancestors preloads
+      # this will be needed in order to build a full context
+      # for authorization purposes.
+      case entity_read_preloads(target, schema) do
+        [] ->
+          rel[:name]
+
+        parent_preloads ->
+          {rel[:name], parent_preloads}
+      end
+    end)
   end
 
-  defp with_api_read_funs(funs, e, schema_module, repo_module) do
+  defp with_api_read_funs(funs, e, schema_module, repo_module, schema) do
     [
       quote do
         def get_by_id(id) do
           case unquote(schema_module)
                |> unquote(repo_module).get(id)
-               |> unquote(repo_module).preload(unquote(entity_read_preloads(e))) do
+               |> unquote(repo_module).preload(unquote(entity_read_preloads(e, schema))) do
             nil ->
               {:error, :not_found}
 
@@ -1083,7 +1139,7 @@ defmodule Graphism do
 
               case unquote(schema_module)
                    |> unquote(repo_module).get_by([{unquote(attr[:name]), value}])
-                   |> unquote(repo_module).preload(unquote(entity_read_preloads(e))) do
+                   |> unquote(repo_module).preload(unquote(entity_read_preloads(e, schema))) do
                 nil ->
                   {:error, :not_found}
 
@@ -1130,7 +1186,7 @@ defmodule Graphism do
     end
   end
 
-  defp with_api_create_fun(funs, e, schema_module, repo_module) do
+  defp with_api_create_fun(funs, e, schema_module, repo_module, _schema) do
     fun_body =
       case virtual?(e) do
         true ->
@@ -1185,7 +1241,7 @@ defmodule Graphism do
     ]
   end
 
-  defp with_api_update_fun(funs, e, schema_module, repo_module) do
+  defp with_api_update_fun(funs, e, schema_module, repo_module, _schema) do
     fun_body =
       quote do
         unquote_splicing(
@@ -1235,7 +1291,7 @@ defmodule Graphism do
     ]
   end
 
-  defp with_api_delete_fun(funs, _e, schema_module, repo_module) do
+  defp with_api_delete_fun(funs, _e, schema_module, repo_module, _schema) do
     [
       quote do
         def delete(%unquote(schema_module){} = e) do
@@ -1246,7 +1302,7 @@ defmodule Graphism do
     ]
   end
 
-  defp with_api_custom_funs(funs, e, schema_module, repo_module) do
+  defp with_api_custom_funs(funs, e, schema_module, repo_module, _schema) do
     Enum.map(e[:custom_actions], fn {action, opts} ->
       api_custom_fun(e, action, opts, schema_module, repo_module)
     end) ++ funs
