@@ -761,71 +761,62 @@ defmodule Graphism do
         fun.()
 
       mod ->
-        ast =
-          quote do
-            auth_context = Map.drop(context, [:__absinthe_plug__, :loader, :pubsub])
+        quote do
+          auth_context = Map.drop(context, [:__absinthe_plug__, :loader, :pubsub])
 
-            # Add all parent entities to the authorization context
-            # if we are mutating something
-            unquote_splicing(
-              case mutating_action?(action) do
-                true ->
-                  e[:relations]
-                  |> Enum.filter(fn rel -> rel[:kind] == :belongs_to end)
-                  |> Enum.flat_map(fn rel ->
-                    target = find_entity!(schema, rel[:target])
-                    context_var = Macro.var(rel[:name], nil)
+          # Add all parent entities to the authorization context
+          # if we are mutating something
+          unquote_splicing(
+            case mutating_action?(action) do
+              true ->
+                e[:relations]
+                |> Enum.filter(fn rel -> rel[:kind] == :belongs_to end)
+                |> Enum.flat_map(fn rel ->
+                  target = find_entity!(schema, rel[:target])
+                  context_var = Macro.var(rel[:name], nil)
 
-                    [
-                      quote do
-                        auth_context =
-                          Map.put(
-                            auth_context,
-                            unquote(target[:name]),
-                            unquote(context_var)
-                          )
-                      end
-                      | entity_ancestor_auth_context(target, schema, context_var)
-                    ]
-                  end)
-
-                false ->
-                  []
-              end
-            )
-
-            # if we are updating an entity, then put it also
-            # in the authorization context
-            unquote_splicing(
-              case action == :update do
-                true ->
                   [
                     quote do
-                      auth_context = Map.put(auth_context, unquote(e[:name]), entity)
+                      auth_context =
+                        Map.put(
+                          auth_context,
+                          unquote(target[:name]),
+                          unquote(context_var)
+                        )
                     end
+                    | entity_ancestor_auth_context(target, schema, context_var)
                   ]
+                end)
 
-                false ->
-                  []
-              end
-            )
-
-            case unquote(mod).allow?(args, auth_context) do
               false ->
-                {:error, :unauthorized}
-
-              true ->
-                unquote(fun.())
+                []
             end
+          )
+
+          # if we are updating an entity, then put it also
+          # in the authorization context
+          unquote_splicing(
+            case action == :update do
+              true ->
+                [
+                  quote do
+                    auth_context = Map.put(auth_context, unquote(e[:name]), entity)
+                  end
+                ]
+
+              false ->
+                []
+            end
+          )
+
+          case unquote(mod).allow?(args, auth_context) do
+            false ->
+              {:error, :unauthorized}
+
+            true ->
+              unquote(fun.())
           end
-
-        IO.puts(
-          ast
-          |> Macro.to_string()
-          |> Code.format_string!()
-        )
-
-        ast
+        end
     end
   end
 
