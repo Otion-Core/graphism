@@ -70,7 +70,7 @@ $ mix graphism.gen.migrations
 Do not forget to run `mix ecto.migrate` afterwards.
 
 
-## Schema Modifiers
+## Schema Modifiers :abacus:
 
 We have two types of modifiers. Entity modifiers and attribute modifiers. They both allow customizations in behaviour.
 
