@@ -969,7 +969,15 @@ defmodule Graphism do
         unquote(
           with_auth(e, action, schema, fn ->
             quote do
-              args = Map.put(args, :id, Ecto.UUID.generate())
+              args =
+                case Map.get(args, :id, nil) do
+                  nil ->
+                    Map.put(args, :id, Ecto.UUID.generate())
+
+                  _ ->
+                    args
+                end
+
               unquote(api_module).unquote(action)(args)
             end
           end)
@@ -1705,23 +1713,37 @@ defmodule Graphism do
   end
 
   defp graphql_custom_mutation(e, action, opts, _schema) do
+    unless opts[:args] do
+      raise "Custom action #{action} in #{e[:name]} has no arguments"
+    end
+
+    unless opts[:produces] do
+      raise "Custom action #{action} in #{e[:name]} does not define an output type. Please set a :produces kind"
+    end
+
     quote do
       @desc "Custom action"
-      field unquote(action), unquote(opts[:produces]) do
+      field unquote(action), non_null(unquote(opts[:produces])) do
         (unquote_splicing(
-           Enum.map(opts[:args], fn arg ->
-             kind =
-               case entity_attribute(e, arg) do
-                 nil ->
-                   :id
-
-                 attr ->
-                   attr_graphql_type(e, attr)
+           Enum.map(opts[:args], fn
+             {arg, kind} ->
+               quote do
+                 arg(unquote(arg), non_null(unquote(kind)))
                end
 
-             quote do
-               arg(unquote(arg), non_null(unquote(kind)))
-             end
+             arg ->
+               kind =
+                 case entity_attribute(e, arg) do
+                   nil ->
+                     :id
+
+                   attr ->
+                     attr_graphql_type(e, attr)
+                 end
+
+               quote do
+                 arg(unquote(arg), non_null(unquote(kind)))
+               end
            end)
          ))
 
