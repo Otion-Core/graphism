@@ -1439,7 +1439,7 @@ defmodule Graphism do
               kind = attr_graphql_type(e, attr)
 
               quote do
-                field(unquote(attr[:name]), unquote(kind))
+                field(unquote(attr[:name]), non_null(unquote(kind)))
               end
             end)) ++
              Enum.map(e[:relations], fn rel ->
