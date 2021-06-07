@@ -474,12 +474,12 @@ defmodule Graphism do
       |> Enum.map(fn rel ->
         case rel[:kind] do
           :has_many ->
-            target = plurals[rel[:name]]
+            target = plurals[rel[:plural]]
 
             unless target do
               raise "Entity #{e[:name]} has relation #{rel[:name]} of unknown type: #{
-                      inspect(plurals)
-                    }"
+                      inspect(Map.keys(plurals))
+                    }. Relation: #{inspect(rel)}"
             end
 
             rel
@@ -1839,10 +1839,10 @@ defmodule Graphism do
     attrs
     |> Enum.map(fn
       {:has_many, _, [name]} ->
-        [name: name, kind: :has_many, opts: []]
+        [name: name, kind: :has_many, opts: [], plural: name]
 
       {:has_many, _, [name, opts]} ->
-        [name: name, kind: :has_many, opts: opts]
+        [name: name, kind: :has_many, opts: opts, plural: name]
 
       {:has_one, _, [name]} ->
         [name: name, kind: :has_one, opts: []]
