@@ -846,11 +846,28 @@ defmodule Graphism do
                          rels
                          |> Enum.map(fn rel ->
                            parent_var = Macro.var(rel[:name], nil)
-                           target = find_entity!(schema, rel[:target])
 
-                           quote do
-                             {:ok, unquote(parent_var)} <-
-                               unquote(target[:api_module]).get_by_id(args.unquote(rel[:name]))
+                           case computed?(rel) do
+                             false ->
+                               target = find_entity!(schema, rel[:target])
+
+                               quote do
+                                 {:ok, unquote(parent_var)} <-
+                                   unquote(target[:api_module]).get_by_id(
+                                     args.unquote(rel[:name])
+                                   )
+                               end
+
+                             true ->
+                               mod = rel[:opts][:using]
+
+                               unless mod do
+                                 raise "relation #{rel[:name]} of #{e[:name]} is computed but does not specify a :using option"
+                               end
+
+                               quote do
+                                 {:ok, unquote(parent_var)} = unquote(mod).execute(context)
+                               end
                            end
                          end)
                        ) do
@@ -904,11 +921,28 @@ defmodule Graphism do
                            rels
                            |> Enum.map(fn rel ->
                              parent_var = Macro.var(rel[:name], nil)
-                             target = find_entity!(schema, rel[:target])
 
-                             quote do
-                               {:ok, unquote(parent_var)} <-
-                                 unquote(target[:api_module]).get_by_id(args.unquote(rel[:name]))
+                             case computed?(rel) do
+                               false ->
+                                 target = find_entity!(schema, rel[:target])
+
+                                 quote do
+                                   {:ok, unquote(parent_var)} <-
+                                     unquote(target[:api_module]).get_by_id(
+                                       args.unquote(rel[:name])
+                                     )
+                                 end
+
+                               true ->
+                                 mod = rel[:opts][:using]
+
+                                 unless mod do
+                                   raise "relation #{rel[:name]} of #{e[:name]} is computed but does not specify a :using option"
+                                 end
+
+                                 quote do
+                                   {:ok, unquote(parent_var)} = unquote(mod).execute(context)
+                                 end
                              end
                            end)
                          ) do
@@ -1160,6 +1194,17 @@ defmodule Graphism do
       nil ->
         nil
 
+      mods when is_list(mods) ->
+        quote do
+          (unquote_splicing(
+             Enum.map(mods, fn mod ->
+               quote do
+                 {:ok, attrs} = unquote(mod).execute(attrs)
+               end
+             end)
+           ))
+        end
+
       mod ->
         quote do
           {:ok, attrs} = unquote(mod).execute(attrs)
@@ -1176,7 +1221,20 @@ defmodule Graphism do
       nil ->
         nil
 
-      mod ->
+      mods when is_list(mods) ->
+        quote do
+          with {:ok, res} <- result do
+            (unquote_splicing(
+               Enum.map(mods, fn mod ->
+                 quote do
+                   unquote(mod).execute(res)
+                 end
+               end)
+             ))
+          end
+        end
+
+      mod when is_atom(mod) ->
         quote do
           with {:ok, res} <- result do
             unquote(mod).execute(res)
@@ -1650,6 +1708,7 @@ defmodule Graphism do
            end)) ++
             (e[:relations]
              |> Enum.filter(fn rel -> :belongs_to == rel[:kind] || :has_one == rel[:kind] end)
+             |> Enum.reject(&computed?(&1))
              |> Enum.map(fn rel ->
                quote do
                  arg(unquote(rel[:name]), non_null(:id))
@@ -1683,6 +1742,7 @@ defmodule Graphism do
              end)) ++
             (e[:relations]
              |> Enum.filter(fn rel -> :belongs_to == rel[:kind] || :has_one == rel[:kind] end)
+             |> Enum.reject(&computed?(&1))
              |> Enum.map(fn rel ->
                quote do
                  arg(unquote(rel[:name]), :id)
@@ -1806,18 +1866,35 @@ defmodule Graphism do
     []
   end
 
+  defp with_action_hook(opts, name) do
+    case opts[name] do
+      nil ->
+        opts
+
+      {:__aliases__, _, mod} ->
+        Keyword.put(opts, name, Module.concat(mod))
+
+      mods when is_list(mods) ->
+        Keyword.put(
+          opts,
+          name,
+          Enum.map(mods, fn {:__aliases__, _, mod} ->
+            Module.concat(mod)
+          end)
+        )
+    end
+  end
+
   defp actions_from({:__block__, [], actions}) do
     actions
     |> Enum.reduce([], fn
       {:action, _, [name, opts]}, acc ->
         opts =
-          case opts[:using] do
-            nil ->
-              opts
-
-            {:__aliases__, _, mod} ->
-              Keyword.put(opts, :using, Module.concat(mod))
-          end
+          opts
+          |> with_action_hook(:using)
+          |> with_action_hook(:before)
+          |> with_action_hook(:after)
+          |> with_action_hook(:allow)
 
         Keyword.put(acc, name, opts)
 
