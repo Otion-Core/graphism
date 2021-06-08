@@ -1741,17 +1741,7 @@ defmodule Graphism do
                quote do
                  arg(
                    unquote(attr[:name]),
-                   unquote(
-                     case optional?(attr) do
-                       true ->
-                         kind
-
-                       false ->
-                         quote do
-                           non_null(unquote(kind))
-                         end
-                     end
-                   )
+                   unquote(kind)
                  )
                end
              end)) ++
