@@ -50,6 +50,7 @@ defmodule Graphism do
       import Absinthe.Resolution.Helpers, only: [dataloader: 1]
 
       @sources [unquote(__CALLER__.module).Dataloader.Repo]
+      @fields_auth unquote(__CALLER__.module).FieldsAuth
 
       def context(ctx) do
         loader =
@@ -65,7 +66,7 @@ defmodule Graphism do
       end
 
       def middleware(middleware, _field, object) do
-        middleware ++ [Graphism.ErrorMiddleware]
+        middleware ++ [Graphism.ErrorMiddleware, @fields_auth]
       end
     end
   end
@@ -91,6 +92,55 @@ defmodule Graphism do
         end
       """
     end
+
+    schema_settings =
+      quote do
+        defmodule FieldsAuth do
+          alias Absinthe.Blueprint.Document.Field
+
+          def call(
+                %{
+                  definition: %Field{
+                    schema_node: %Absinthe.Type.Field{identifier: field},
+                    parent_type: %Absinthe.Type.Object{identifier: entity}
+                  }
+                } = resolution,
+                _
+              ) do
+            auth(entity, field, resolution)
+          end
+
+          def call(resolution, _), do: resolution
+
+          unquote_splicing(
+            Enum.flat_map(schema, fn e ->
+              (e[:attributes] ++ e[:relations])
+              |> Enum.filter(fn attr -> attr[:opts][:allow] end)
+              |> Enum.map(fn field ->
+                mod = field[:opts][:allow]
+
+                quote do
+                  defp auth(unquote(e[:name]), unquote(field[:name]), resolution) do
+                    context =
+                      resolution.context
+                      |> Map.drop([:pubsub, :loader, :__absinthe_plug__])
+
+                    case unquote(mod).allow?(resolution.value, context) do
+                      true ->
+                        resolution
+
+                      false ->
+                        %{resolution | value: nil}
+                    end
+                  end
+                end
+              end)
+            end)
+          )
+
+          defp auth(_, _, resolution), do: resolution
+        end
+      end
 
     schema_fun =
       quote do
@@ -227,6 +277,7 @@ defmodule Graphism do
       end
 
     List.flatten([
+      schema_settings,
       schema_fun,
       schema_empty_modules,
       schema_modules,
@@ -472,33 +523,42 @@ defmodule Graphism do
     relations =
       e[:relations]
       |> Enum.map(fn rel ->
-        case rel[:kind] do
-          :has_many ->
-            target = plurals[rel[:plural]]
+        rel =
+          case rel[:kind] do
+            :has_many ->
+              target = plurals[rel[:plural]]
 
-            unless target do
-              raise "Entity #{e[:name]} has relation #{rel[:name]} of unknown type: #{
-                      inspect(Map.keys(plurals))
-                    }. Relation: #{inspect(rel)}"
-            end
+              unless target do
+                raise "Entity #{e[:name]} has relation #{rel[:name]} of unknown type: #{
+                        inspect(Map.keys(plurals))
+                      }. Relation: #{inspect(rel)}"
+              end
 
-            rel
-            |> Keyword.put(:target, target)
-            |> Keyword.put(:name, rel[:opts][:as] || rel[:name])
+              rel
+              |> Keyword.put(:target, target)
+              |> Keyword.put(:name, rel[:opts][:as] || rel[:name])
 
-          _ ->
-            target = index[rel[:name]]
+            _ ->
+              target = index[rel[:name]]
 
-            unless target do
-              raise "Entity #{e[:name]} has relation #{rel[:name]} of unknown type: #{
-                      inspect(Map.keys(index))
-                    }"
-            end
+              unless target do
+                raise "Entity #{e[:name]} has relation #{rel[:name]} of unknown type: #{
+                        inspect(Map.keys(index))
+                      }"
+              end
 
-            rel
-            |> Keyword.put(:target, target[:name])
-            |> Keyword.put(:name, rel[:opts][:as] || rel[:name])
-        end
+              rel
+              |> Keyword.put(:target, target[:name])
+              |> Keyword.put(:name, rel[:opts][:as] || rel[:name])
+          end
+
+        opts = rel[:opts]
+
+        opts =
+          opts
+          |> with_action_hook(:allow)
+
+        Keyword.put(rel, :opts, opts)
       end)
 
     Keyword.put(e, :relations, relations)
@@ -1438,28 +1498,49 @@ defmodule Graphism do
               # on whether it is an enum or not
               kind = attr_graphql_type(e, attr)
 
+              kind =
+                case attr[:opts][:allow] do
+                  nil ->
+                    quote do
+                      non_null(unquote(kind))
+                    end
+
+                  _ ->
+                    kind
+                end
+
               quote do
-                field(unquote(attr[:name]), non_null(unquote(kind)))
+                field(unquote(attr[:name]), unquote(kind))
               end
             end)) ++
              Enum.map(e[:relations], fn rel ->
-               # Add a field for each relation
+               kind =
+                 case {rel[:kind], rel[:opts][:allow]} do
+                   {:has_many, nil} ->
+                     quote do
+                       list_of(unquote(rel[:target]))
+                     end
+
+                   {:has_many, _} ->
+                     quote do
+                       list_of(non_null(unquote(rel[:target])))
+                     end
+
+                   {_, nil} ->
+                     quote do
+                       non_null(unquote(rel[:target]))
+                     end
+
+                   {_, _} ->
+                     quote do
+                       unquote(rel[:target])
+                     end
+                 end
+
                quote do
                  field(
                    unquote(rel[:name]),
-                   unquote(
-                     case rel[:kind] do
-                       :has_many ->
-                         quote do
-                           list_of(unquote(rel[:target]))
-                         end
-
-                       _ ->
-                         quote do
-                           non_null(unquote(rel[:target]))
-                         end
-                     end
-                   ),
+                   unquote(kind),
                    resolve: dataloader(unquote(opts[:caller]).Dataloader.Repo)
                  )
                end
