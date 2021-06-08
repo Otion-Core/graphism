@@ -685,6 +685,32 @@ defmodule Graphism do
             end)
           )
         end
+
+        def delete_changeset(e) do
+          changes = e |> cast(%{}, [])
+
+          unquote_splicing(
+            e[:relations]
+            |> Enum.filter(fn rel -> rel[:kind] == :has_one || rel[:kind] == :has_many end)
+            |> Enum.map(fn rel ->
+              target = find_entity!(schema, rel[:target])
+              target_table = target[:table]
+              constraint = "#{target_table}_#{e[:name]}_id_fkey"
+              message = "not empty"
+
+              quote do
+                changes =
+                  changes
+                  |> foreign_key_constraint(unquote(rel[:name]),
+                    name: unquote(constraint),
+                    message: unquote(message)
+                  )
+              end
+            end)
+          )
+
+          changes
+        end
       end
     end
   end
@@ -856,11 +882,12 @@ defmodule Graphism do
           # if we are updating an entity, then put it also
           # in the authorization context
           unquote_splicing(
-            case action == :update do
+            case action == :update || action == :delete do
               true ->
                 [
                   quote do
-                    auth_context = Map.put(auth_context, unquote(e[:name]), entity)
+                    auth_context =
+                      Map.put(auth_context, unquote(e[:name]), unquote(Macro.var(e[:name], nil)))
                   end
                 ]
 
@@ -963,7 +990,7 @@ defmodule Graphism do
     with_entity_funs(funs, e, :update, fn ->
       quote do
         def update(_, %{id: id} = args, %{context: context}) do
-          with {:ok, entity} <- unquote(api_module).get_by_id(id) do
+          with {:ok, unquote(Macro.var(e[:name], nil))} <- unquote(api_module).get_by_id(id) do
             args = Map.drop(args, [:id])
 
             unquote(
@@ -971,7 +998,10 @@ defmodule Graphism do
                 [] ->
                   with_auth(e, :update, schema, fn ->
                     quote do
-                      unquote(api_module).update(entity, args)
+                      unquote(api_module).update(
+                        unquote(Macro.var(e[:name], nil)),
+                        args
+                      )
                     end
                   end)
 
@@ -1017,7 +1047,7 @@ defmodule Graphism do
                                   Macro.var(rel[:name], nil)
                                 end)
                               ),
-                              entity,
+                              unquote(Macro.var(e[:name], nil)),
                               args
                             )
                           end
@@ -1037,15 +1067,15 @@ defmodule Graphism do
     with_entity_funs(funs, e, :delete, fn ->
       quote do
         def delete(_, %{id: id} = args, %{context: context}) do
-          unquote(
-            with_auth(e, :delete, schema, fn ->
-              quote do
-                with {:ok, entity} <- unquote(api_module).get_by_id(id) do
-                  unquote(api_module).delete(entity)
+          with {:ok, unquote(Macro.var(e[:name], nil))} <- unquote(api_module).get_by_id(id) do
+            unquote(
+              with_auth(e, :delete, schema, fn ->
+                quote do
+                  unquote(api_module).delete(unquote(Macro.var(e[:name], nil)))
                 end
-              end
-            end)
-          )
+              end)
+            )
+          end
         end
       end
     end)
@@ -1412,7 +1442,9 @@ defmodule Graphism do
     [
       quote do
         def delete(%unquote(schema_module){} = e) do
-          unquote(repo_module).delete(e)
+          e
+          |> unquote(schema_module).delete_changeset()
+          |> unquote(repo_module).delete()
         end
       end
       | funs
