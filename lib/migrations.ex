@@ -785,10 +785,19 @@ defmodule Graphism.Migrations do
     end)
   end
 
-  defp table_index(tables, tab) do
+  defp table_index(tables, tab, inverse \\ false) do
+    tables =
+      case inverse do
+        false ->
+          tables
+
+        true ->
+          Enum.reverse(tables)
+      end
+
     case Enum.find(tables, fn {t, _} -> tab == t end) do
       nil ->
-        raise "Table #{tab} could not be found in tables graph #{inspect(tables)}. This is a bug. Maybe a table was renamed?"
+        -1000
 
       {^tab, index} ->
         index
@@ -816,7 +825,7 @@ defmodule Graphism.Migrations do
               {m, table_index(tables, m[:table])}
 
             :drop ->
-              {m, -1000}
+              {m, table_index(tables, m[:table], true)}
 
             :alter ->
               {m, 0}

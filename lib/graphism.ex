@@ -1736,8 +1736,23 @@ defmodule Graphism do
                attr[:name] == :id || computed?(attr)
              end)
              |> Enum.map(fn attr ->
+               kind = attr_graphql_type(e, attr)
+
                quote do
-                 arg(unquote(attr[:name]), unquote(attr[:kind]))
+                 arg(
+                   unquote(attr[:name]),
+                   unquote(
+                     case optional?(attr) do
+                       true ->
+                         kind
+
+                       false ->
+                         quote do
+                           non_null(unquote(kind))
+                         end
+                     end
+                   )
+                 )
                end
              end)) ++
             (e[:relations]
