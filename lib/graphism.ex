@@ -243,6 +243,14 @@ defmodule Graphism do
         end
       end
 
+    input_types =
+      schema
+      |> Enum.reject(&internal?(&1))
+      |> Enum.flat_map(fn e ->
+        graphql_input_types(e, schema)
+      end)
+      |> without_nils()
+
     entities_mutations =
       schema
       |> Enum.reject(&internal?(&1))
@@ -284,6 +292,7 @@ defmodule Graphism do
       api_modules,
       resolver_modules,
       enums,
+      input_types,
       objects,
       self_resolver,
       entities_queries,
@@ -320,7 +329,6 @@ defmodule Graphism do
       |> with_enums()
 
     Module.put_attribute(__CALLER__.module, :schema, entity)
-
     block
   end
 
@@ -345,6 +353,8 @@ defmodule Graphism do
   defp without_nils(enum) do
     Enum.reject(enum, fn item -> item == nil end)
   end
+
+  defp flat(enum), do: List.flatten(enum)
 
   defp validate_attribute_name!(name) do
     unless is_atom(name) do
@@ -642,8 +652,9 @@ defmodule Graphism do
                             |> Enum.map(fn attr ->
                               attr[:name]
                             end)) ++
-                             (e[:relations]
-                              |> Enum.filter(fn rel -> rel[:kind] == :belongs_to end)
+                             (e
+                              |> parent_relations()
+                              |> Enum.reject(&optional?(&1))
                               |> Enum.map(fn rel ->
                                 String.to_atom("#{rel[:name]}_id")
                               end))
@@ -656,7 +667,10 @@ defmodule Graphism do
                               attr[:name]
                             end)) ++
                              (e[:relations]
-                              |> Enum.filter(fn rel -> rel[:kind] == :has_one end)
+                              |> Enum.filter(fn rel ->
+                                rel[:kind] == :has_one || rel[:kind] == :belongs_to
+                              end)
+                              |> Enum.filter(&optional?(&1))
                               |> Enum.map(fn rel ->
                                 String.to_atom("#{rel[:name]}_id")
                               end))
@@ -731,84 +745,34 @@ defmodule Graphism do
     end
   end
 
-  defp with_resolver_read_funs(funs, e, schema, api_module) do
+  defp with_resolver_read_funs(funs, e, _schema, _api_module) do
     with_entity_funs(funs, e, :read, fn ->
       [
         quote do
           def get_by_id(_, %{id: id} = args, %{context: context}) do
-            with {:ok, args} = res <- unquote(api_module).get_by_id(id) do
-              unquote(
-                with_auth(
-                  e,
-                  :read,
-                  schema,
-                  fn ->
-                    quote do
-                      res
-                    end
-                  end
-                )
-              )
+            with unquote_splicing([
+                   with_entity_fetch(e),
+                   with_should(e, :read)
+                 ]) do
+              {:ok, unquote(var(e))}
             end
           end
         end
         | e[:attributes]
           |> Enum.filter(fn attr -> attr[:opts][:unique] end)
           |> Enum.map(fn attr ->
+            attr_name = attr[:name]
+            fun_name = String.to_atom("get_by_#{attr[:name]}")
+
             quote do
-              def unquote(String.to_atom("get_by_#{attr[:name]}"))(
+              def unquote(fun_name)(
                     _,
-                    %{unquote(attr[:name]) => arg} = args,
+                    %{unquote(attr_name) => arg} = args,
                     %{context: context}
                   ) do
-                unquote(
-                  with_auth(e, :read, schema, fn ->
-                    quote do
-                      unquote(api_module).unquote(String.to_atom("get_by_#{attr[:name]}"))(arg)
-                    end
-                  end)
-                )
-              end
-            end
-          end)
-      ]
-    end)
-  end
-
-  defp with_resolver_list_funs(funs, e, schema, api_module) do
-    with_entity_funs(funs, e, :list, fn ->
-      [
-        quote do
-          def list(_, args, %{context: context}) do
-            unquote(
-              with_auth(e, :list, schema, fn ->
-                quote do
-                  {:ok, unquote(api_module).list(context)}
+                with unquote_splicing([with_entity_fetch(e, attr_name), with_should(e, :read)]) do
+                  {:ok, unquote(var(e))}
                 end
-              end)
-            )
-          end
-        end
-        | e[:relations]
-          |> Enum.filter(fn rel -> rel[:kind] == :belongs_to end)
-          |> Enum.map(fn rel ->
-            quote do
-              def unquote(String.to_atom("list_by_#{rel[:name]}"))(
-                    _,
-                    %{unquote(rel[:name]) => arg} = args,
-                    %{context: context}
-                  ) do
-                unquote(
-                  with_auth(e, :list, schema, fn ->
-                    quote do
-                      {:ok,
-                       unquote(api_module).unquote(String.to_atom("list_by_#{rel[:name]}"))(
-                         arg,
-                         context
-                       )}
-                    end
-                  end)
-                )
               end
             end
           end)
@@ -816,171 +780,485 @@ defmodule Graphism do
     end)
   end
 
-  defp entity_ancestor_auth_context(e, schema, context_var) do
-    e[:relations]
-    |> Enum.filter(fn rel -> rel[:kind] == :belongs_to end)
+  defp find_relation_by_kind_and_target!(e, kind, target) do
+    rel =
+      e[:relations]
+      |> Enum.find(fn rel ->
+        rel[:kind] == kind && rel[:target] == target
+      end)
+
+    unless rel do
+      raise "relation of kind #{kind} and target #{target} not found in #{inspect(e)}"
+    end
+
+    rel
+  end
+
+  defp with_resolver_auth_funs(funs, e, schema) do
+    funs ++
+      ((e[:actions] ++ e[:custom_actions])
+       |> Enum.map(fn {name, opts} ->
+         resolver_auth_fun(name, opts, e, schema)
+       end))
+  end
+
+  defp ancestor_auth_context(e, schema, context_var) do
+    e
+    |> parent_relations()
     |> Enum.flat_map(fn rel ->
       target = find_entity!(schema, rel[:target])
-      parent_context_var = Macro.var(target[:name], nil)
+      parent_context_var = var(target)
 
       [
         quote do
           unquote(parent_context_var) = unquote(context_var).unquote(rel[:name])
 
-          auth_context =
+          context =
             Map.put(
-              auth_context,
+              context,
               unquote(target[:name]),
               unquote(parent_context_var)
             )
         end
-        | entity_ancestor_auth_context(target, schema, parent_context_var)
+        | ancestor_auth_context(target, schema, parent_context_var)
       ]
     end)
   end
 
-  defp with_auth(e, action, schema, fun) do
-    case action_for(e, action)[:allow] do
-      nil ->
-        # for now we allow, but in the future we will deny
-        # by default
-        fun.()
+  defp auth_fun_entities_args(e, action) do
+    case action do
+      :update ->
+        (e |> parent_relations() |> vars()) ++ [var(e)]
 
-      mod ->
-        quote do
-          auth_context = Map.drop(context, [:__absinthe_plug__, :loader, :pubsub])
+      :delete ->
+        [var(e)]
 
-          # Add all parent entities to the authorization context
-          # if we are mutating something
-          unquote_splicing(
-            case mutating_action?(action) do
-              true ->
-                e[:relations]
-                |> Enum.filter(fn rel -> rel[:kind] == :belongs_to end)
-                |> Enum.flat_map(fn rel ->
-                  target = find_entity!(schema, rel[:target])
-                  context_var = Macro.var(rel[:name], nil)
+      :create ->
+        e |> parent_relations() |> vars()
 
-                  [
-                    quote do
-                      auth_context =
-                        Map.put(
-                          auth_context,
-                          unquote(target[:name]),
-                          unquote(context_var)
-                        )
-                    end
-                    | entity_ancestor_auth_context(target, schema, context_var)
-                  ]
-                end)
+      :read ->
+        [var(e)]
 
-              false ->
-                []
-            end
-          )
+      _ ->
+        []
+    end
+  end
 
-          # if we are updating an entity, then put it also
-          # in the authorization context
-          unquote_splicing(
-            case action == :update || action == :delete do
-              true ->
-                [
-                  quote do
-                    auth_context =
-                      Map.put(auth_context, unquote(e[:name]), unquote(Macro.var(e[:name], nil)))
-                  end
-                ]
+  defp resolver_auth_fun(action, opts, e, schema) do
+    mod = opts[:allow]
 
-              false ->
-                []
-            end
-          )
+    unless mod do
+      raise "action #{action} of entity #{e[:name]} does not define an :allow option"
+    end
 
-          case unquote(mod).allow?(args, auth_context) do
-            false ->
-              {:error, :unauthorized}
+    fun_name = String.to_atom("should_#{action}?")
 
+    quote do
+      def unquote(fun_name)(
+            unquote_splicing(auth_fun_entities_args(e, action)),
+            args,
+            context
+          ) do
+        context = Map.drop(context, [:__absinthe_plug__, :loader, :pubsub])
+
+        unquote_splicing(
+          case mutating_action?(action) do
             true ->
-              unquote(fun.())
+              e
+              |> parent_relations()
+              |> Enum.flat_map(fn rel ->
+                target = find_entity!(schema, rel[:target])
+                context_var = var(rel)
+
+                case optional?(rel) do
+                  true ->
+                    [
+                      quote do
+                        context =
+                          case unquote(context_var) do
+                            nil ->
+                              context
+
+                            _ ->
+                              (unquote_splicing([
+                                 quote do
+                                   context =
+                                     Map.put(
+                                       context,
+                                       unquote(target[:name]),
+                                       unquote(context_var)
+                                     )
+                                 end
+                                 | ancestor_auth_context(target, schema, context_var)
+                               ]))
+                          end
+                      end
+                    ]
+
+                  false ->
+                    [
+                      quote do
+                        context =
+                          Map.put(
+                            context,
+                            unquote(target[:name]),
+                            unquote(context_var)
+                          )
+                      end
+                      | ancestor_auth_context(target, schema, context_var)
+                    ]
+                end
+              end)
+
+            false ->
+              []
+          end
+        )
+
+        # if we are updating an entity, then put it also
+        # in the authorization context
+        unquote_splicing(
+          case action == :update || action == :delete do
+            true ->
+              [
+                quote do
+                  context = Map.put(context, unquote(e[:name]), unquote(var(e)))
+                end
+              ]
+
+            false ->
+              []
+          end
+        )
+
+        with false <- unquote(mod).allow?(args, context) do
+          {:error, :unauthorized}
+        end
+      end
+    end
+  end
+
+  defp with_resolver_inlined_relations_funs(funs, e, schema, _api_module) do
+    (Enum.map([:create], fn action ->
+       case inlined_children_for_action(e, action) do
+         [] ->
+           nil
+
+         rels ->
+           fun_name = String.to_atom("#{action}_inline_relations")
+
+           [
+             quote do
+               def unquote(fun_name)(unquote(Macro.var(e[:name], nil)), args, graphql) do
+                 with unquote_splicing(
+                        Enum.map(rels, fn rel ->
+                          quote do
+                            :ok <-
+                              create_inline_relation(
+                                unquote(Macro.var(e[:name], nil)),
+                                args,
+                                unquote(rel[:name]),
+                                graphql
+                              )
+                          end
+                        end)
+                      ) do
+                   :ok
+                 end
+               end
+             end
+             | Enum.map(rels, fn rel ->
+                 target = find_entity!(schema, rel[:target])
+                 resolver_module = target[:resolver_module]
+                 parent_rel = find_relation_by_kind_and_target!(target, :belongs_to, e[:name])
+
+                 quote do
+                   defp create_inline_relation(
+                          unquote(Macro.var(e[:name], nil)),
+                          args,
+                          unquote(rel[:name]),
+                          graphql
+                        ) do
+                     children = Map.fetch!(args, unquote(rel[:name]))
+                     # for now we are assuming this is a list of children,
+                     # but we will need to add support for has_one kind of relations too
+                     # the most generic case being a list, we will treat both kinds of 
+                     # relation with the same logic
+                     Enum.reduce_while(children, :ok, fn child, _ ->
+                       # populate the parent relation 
+                       # and delete to the child entity resolver 
+                       child =
+                         Map.put(
+                           child,
+                           unquote(parent_rel[:name]),
+                           unquote(Macro.var(e[:name], nil)).id
+                         )
+
+                       case unquote(resolver_module).create(
+                              graphql.parent,
+                              child,
+                              graphql.resolution
+                            ) do
+                         {:ok, _} ->
+                           {:cont, :ok}
+
+                         {:error, e} ->
+                           {:halt, {:error, e}}
+                       end
+                     end)
+                   end
+                 end
+               end)
+           ]
+       end
+     end)
+     |> List.flatten()
+     |> without_nils) ++ funs
+  end
+
+  defp with_resolver_list_funs(funs, e, _, api_module) do
+    with_entity_funs(funs, e, :list, fn ->
+      [
+        quote do
+          def list(_, args, %{context: context}) do
+            with true <- should_list?(args, context) do
+              {:ok, unquote(api_module).list(context)}
+            end
           end
         end
+        | e
+          |> parent_relations()
+          |> Enum.map(fn rel ->
+            fun_name = String.to_atom("list_by_#{rel[:name]}")
+
+            quote do
+              def unquote(fun_name)(
+                    _,
+                    %{unquote(rel[:name]) => arg} = args,
+                    %{context: context}
+                  ) do
+                with true <- should_list?(args, context) do
+                  {:ok,
+                   unquote(api_module).unquote(fun_name)(
+                     arg,
+                     context
+                   )}
+                end
+              end
+            end
+          end)
+      ]
+    end)
+  end
+
+  defp inlined_children_for_action(e, action) do
+    e[:relations]
+    |> Enum.filter(fn rel ->
+      :has_many == rel[:kind] &&
+        inline_relation?(rel, action)
+    end)
+  end
+
+  defp parent_relations(e) do
+    e[:relations]
+    |> Enum.filter(fn rel -> rel[:kind] == :belongs_to end)
+  end
+
+  defp names(rels) do
+    rels
+    |> Enum.map(fn rel -> rel[:name] end)
+  end
+
+  defp var(name) when is_atom(name) do
+    Macro.var(name, __MODULE__)
+  end
+
+  defp var(other), do: var(other[:name])
+
+  defp vars(names) do
+    Enum.map(names, &var(&1))
+  end
+
+  defp with_entity_fetch(e) do
+    quote do
+      {:ok, unquote(var(e))} <-
+        unquote(e[:api_module]).get_by_id(unquote(var(:args)).id)
+    end
+  end
+
+  defp with_entity_fetch(e, attr) do
+    fun_name = String.to_atom("get_by_#{attr}")
+
+    quote do
+      {:ok, unquote(var(e))} <-
+        unquote(e[:api_module]).unquote(fun_name)(arg)
+    end
+  end
+
+  # Builds a series of with clauses that fetch entity parent
+  # dependencies required in order to either create or update
+  # the entity
+  defp with_parent_entities_fetch(e, schema) do
+    e
+    |> parent_relations()
+    |> Enum.map(fn rel ->
+      case computed?(rel) do
+        true ->
+          mod = rel[:opts][:using]
+
+          unless mod do
+            raise "relation #{rel[:name]} of #{e[:name]} is computed but does not specify a :using option"
+          end
+
+          quote do
+            {:ok, unquote(var(rel))} = unquote(mod).execute(context)
+          end
+
+        false ->
+          target = find_entity!(schema, rel[:target])
+
+          quote do
+            {:ok, unquote(var(rel))} <-
+              unquote(
+                case optional?(rel) do
+                  false ->
+                    quote do
+                      unquote(target[:api_module]).get_by_id(
+                        unquote(var(:args)).unquote(rel[:name])
+                      )
+                    end
+
+                  true ->
+                    quote do
+                      case Map.get(unquote(var(:args)), unquote(rel[:name]), nil) do
+                        nil ->
+                          {:ok, nil}
+
+                        id ->
+                          unquote(target[:api_module]).get_by_id(id)
+                      end
+                    end
+                end
+              )
+          end
+      end
+    end)
+  end
+
+  # Builds a map of arguments where keys for parent entities
+  # have been removed, since they should have already been resolved
+  # by their ids.
+  defp with_args_without_parents(e) do
+    case parent_relations(e) |> names() do
+      [] ->
+        nil
+
+      names ->
+        quote do
+          args <- Map.drop(args, unquote(names))
+        end
+    end
+  end
+
+  defp with_args_with_autogenerated_id() do
+    quote do
+      args <- Map.put(args, :id, Ecto.UUID.generate())
+    end
+  end
+
+  defp with_args_without_id() do
+    quote do
+      args <- Map.drop(args, [:id])
+    end
+  end
+
+  defp with_should(e, action) do
+    fun_name = String.to_atom("should_#{action}?")
+
+    quote do
+      true <-
+        unquote(fun_name)(
+          unquote_splicing(auth_fun_entities_args(e, action)),
+          args,
+          context
+        )
     end
   end
 
   defp with_resolver_create_fun(funs, e, schema, api_module) do
     with_entity_funs(funs, e, :create, fn ->
+      inlined_children = inlined_children_for_action(e, :create)
+
+      {parent_var, resolution_var} =
+        case inlined_children do
+          [] ->
+            {quote do
+               _parent
+             end,
+             quote do
+               %{context: context}
+             end}
+
+          _ ->
+            {quote do
+               parent
+             end,
+             quote do
+               %{context: context} = resolution
+             end}
+        end
+
       quote do
-        def create(_, args, %{context: context}) do
-          unquote(
-            case Enum.filter(e[:relations], fn rel -> rel[:kind] == :belongs_to end) do
-              [] ->
-                quote do
-                  # Generate an id for the new resource
-                  args = Map.put(args, :id, Ecto.UUID.generate())
-
-                  unquote(
-                    with_auth(e, :create, schema, fn ->
-                      quote do
-                        unquote(api_module).create(args)
-                      end
-                    end)
-                  )
-                end
-
-              rels ->
-                quote do
-                  with unquote_splicing(
-                         rels
-                         |> Enum.map(fn rel ->
-                           parent_var = Macro.var(rel[:name], nil)
-
-                           case computed?(rel) do
-                             false ->
-                               target = find_entity!(schema, rel[:target])
-
-                               quote do
-                                 {:ok, unquote(parent_var)} <-
-                                   unquote(target[:api_module]).get_by_id(
-                                     args.unquote(rel[:name])
-                                   )
-                               end
-
-                             true ->
-                               mod = rel[:opts][:using]
-
-                               unless mod do
-                                 raise "relation #{rel[:name]} of #{e[:name]} is computed but does not specify a :using option"
-                               end
-
-                               quote do
-                                 {:ok, unquote(parent_var)} = unquote(mod).execute(context)
-                               end
-                           end
-                         end)
-                       ) do
-                    args =
-                      args
-                      |> Map.drop(unquote(Enum.map(rels, fn rel -> rel[:name] end)))
-                      |> Map.put(:id, Ecto.UUID.generate())
-
-                    unquote(
-                      with_auth(e, :create, schema, fn ->
-                        quote do
-                          unquote(api_module).create(
-                            unquote_splicing(
-                              Enum.map(rels, fn rel ->
-                                Macro.var(rel[:name], nil)
-                              end)
-                            ),
-                            args
-                          )
-                        end
-                      end)
+        def create(unquote(parent_var), unquote(var(:args)), unquote(resolution_var)) do
+          with unquote_splicing(
+                 [
+                   with_parent_entities_fetch(e, schema),
+                   with_args_without_parents(e),
+                   with_args_with_autogenerated_id(),
+                   with_should(e, :create)
+                 ]
+                 |> flat()
+                 |> without_nils()
+               ) do
+            unquote(
+              case inlined_children do
+                [] ->
+                  quote do
+                    unquote(api_module).create(
+                      unquote_splicing(
+                        (e |> parent_relations() |> names() |> vars()) ++ [var(:args)]
+                      )
                     )
                   end
-                end
-            end
-          )
+
+                children ->
+                  nil
+
+                  quote do
+                    {children_args, args} =
+                      Map.split(
+                        args,
+                        unquote(names(children))
+                      )
+
+                    with {:ok, unquote(var(e))} <-
+                           unquote(api_module).create(
+                             unquote_splicing(
+                               (e |> parent_relations() |> names() |> vars()) ++ [var(:args)]
+                             )
+                           ),
+                         :ok <-
+                           create_inline_relations(
+                             unquote(var(e)),
+                             children_args,
+                             %{parent: parent, resolution: resolution}
+                           ) do
+                      {:ok, unquote(var(e))}
+                    end
+                  end
+              end
+            )
+          end
         end
       end
     end)
@@ -989,73 +1267,22 @@ defmodule Graphism do
   defp with_resolver_update_fun(funs, e, schema, api_module) do
     with_entity_funs(funs, e, :update, fn ->
       quote do
-        def update(_, %{id: id} = args, %{context: context}) do
-          with {:ok, unquote(Macro.var(e[:name], nil))} <- unquote(api_module).get_by_id(id) do
-            args = Map.drop(args, [:id])
-
-            unquote(
-              case Enum.filter(e[:relations], fn rel -> rel[:kind] == :belongs_to end) do
-                [] ->
-                  with_auth(e, :update, schema, fn ->
-                    quote do
-                      unquote(api_module).update(
-                        unquote(Macro.var(e[:name], nil)),
-                        args
-                      )
-                    end
-                  end)
-
-                rels ->
-                  quote do
-                    with unquote_splicing(
-                           rels
-                           |> Enum.map(fn rel ->
-                             parent_var = Macro.var(rel[:name], nil)
-
-                             case computed?(rel) do
-                               false ->
-                                 target = find_entity!(schema, rel[:target])
-
-                                 quote do
-                                   {:ok, unquote(parent_var)} <-
-                                     unquote(target[:api_module]).get_by_id(
-                                       args.unquote(rel[:name])
-                                     )
-                                 end
-
-                               true ->
-                                 mod = rel[:opts][:using]
-
-                                 unless mod do
-                                   raise "relation #{rel[:name]} of #{e[:name]} is computed but does not specify a :using option"
-                                 end
-
-                                 quote do
-                                   {:ok, unquote(parent_var)} = unquote(mod).execute(context)
-                                 end
-                             end
-                           end)
-                         ) do
-                      args = Map.drop(args, unquote(Enum.map(rels, fn rel -> rel[:name] end)))
-
-                      unquote(
-                        with_auth(e, :update, schema, fn ->
-                          quote do
-                            unquote(api_module).update(
-                              unquote_splicing(
-                                Enum.map(rels, fn rel ->
-                                  Macro.var(rel[:name], nil)
-                                end)
-                              ),
-                              unquote(Macro.var(e[:name], nil)),
-                              args
-                            )
-                          end
-                        end)
-                      )
-                    end
-                  end
-              end
+        def update(_parent, unquote(var(:args)), %{context: context}) do
+          with unquote_splicing(
+                 [
+                   with_entity_fetch(e),
+                   with_parent_entities_fetch(e, schema),
+                   with_args_without_parents(e),
+                   with_args_without_id(),
+                   with_should(e, :update)
+                 ]
+                 |> flat()
+                 |> without_nils()
+               ) do
+            unquote(api_module).update(
+              unquote_splicing(
+                (e |> parent_relations() |> names() |> vars()) ++ [var(e), var(:args)]
+              )
             )
           end
         end
@@ -1063,18 +1290,19 @@ defmodule Graphism do
     end)
   end
 
-  defp with_resolver_delete_fun(funs, e, schema, api_module) do
+  defp with_resolver_delete_fun(funs, e, _schema, api_module) do
     with_entity_funs(funs, e, :delete, fn ->
       quote do
-        def delete(_, %{id: id} = args, %{context: context}) do
-          with {:ok, unquote(Macro.var(e[:name], nil))} <- unquote(api_module).get_by_id(id) do
-            unquote(
-              with_auth(e, :delete, schema, fn ->
-                quote do
-                  unquote(api_module).delete(unquote(Macro.var(e[:name], nil)))
-                end
-              end)
-            )
+        def delete(_parent, unquote(var(:args)), %{context: context}) do
+          with unquote_splicing(
+                 [
+                   with_entity_fetch(e),
+                   with_should(e, :delete)
+                 ]
+                 |> flat()
+                 |> without_nils()
+               ) do
+            unquote(api_module).delete(unquote(var(e)))
           end
         end
       end
@@ -1087,25 +1315,23 @@ defmodule Graphism do
     end) ++ funs
   end
 
-  defp resolver_custom_fun(e, action, _opts, api_module, schema) do
+  defp resolver_custom_fun(e, action, _opts, api_module, _schema) do
     quote do
       def unquote(action)(_, args, %{context: context}) do
-        unquote(
-          with_auth(e, action, schema, fn ->
-            quote do
-              args =
-                case Map.get(args, :id, nil) do
-                  nil ->
-                    Map.put(args, :id, Ecto.UUID.generate())
+        with unquote_splicing([
+               with_should(e, action)
+             ]) do
+          args =
+            case Map.get(args, :id, nil) do
+              nil ->
+                Map.put(args, :id, Ecto.UUID.generate())
 
-                  _ ->
-                    args
-                end
-
-              unquote(api_module).unquote(action)(args)
+              _ ->
+                args
             end
-          end)
-        )
+
+          unquote(api_module).unquote(action)(args)
+        end
       end
     end
   end
@@ -1115,6 +1341,8 @@ defmodule Graphism do
 
     resolver_funs =
       []
+      |> with_resolver_auth_funs(e, schema)
+      |> with_resolver_inlined_relations_funs(e, schema, api_module)
       |> with_resolver_list_funs(e, schema, api_module)
       |> with_resolver_read_funs(e, schema, api_module)
       |> with_resolver_create_fun(e, schema, api_module)
@@ -1123,11 +1351,19 @@ defmodule Graphism do
       |> with_resolver_custom_funs(e, schema, api_module)
       |> List.flatten()
 
-    quote do
-      defmodule unquote(e[:resolver_module]) do
-        (unquote_splicing(resolver_funs))
+    ast =
+      quote do
+        defmodule unquote(e[:resolver_module]) do
+          (unquote_splicing(resolver_funs))
+        end
       end
-    end
+
+    File.write(
+      "/Users/pedrogutierrez/Desktop/#{e[:name]}.ex",
+      ast |> Macro.to_string() |> Code.format_string!()
+    )
+
+    ast
   end
 
   defp api_module(e, schema, opts) do
@@ -1357,22 +1593,40 @@ defmodule Graphism do
       quote do
         def create(
               unquote_splicing(
-                e[:relations]
-                |> Enum.filter(fn rel -> rel[:kind] == :belongs_to end)
-                |> Enum.map(fn rel -> Macro.var(rel[:name], nil) end)
+                e
+                |> parent_relations()
+                |> vars()
               ),
               attrs
             ) do
           unquote_splicing(
-            e[:relations]
-            |> Enum.filter(fn rel -> rel[:kind] == :belongs_to end)
+            e
+            |> parent_relations()
             |> Enum.map(fn rel ->
               quote do
                 attrs =
                   attrs
                   |> Map.put(
                     unquote(String.to_atom("#{rel[:name]}_id")),
-                    unquote(Macro.var(rel[:name], nil)).id
+                    unquote(
+                      case optional?(rel) do
+                        true ->
+                          quote do
+                            case Map.get(attrs, unquote(var(rel)), nil) do
+                              nil ->
+                                nil
+
+                              _ ->
+                                unquote(var(rel)).id
+                            end
+                          end
+
+                        false ->
+                          quote do
+                            unquote(var(rel)).id
+                          end
+                      end
+                    )
                   )
               end
             end)
@@ -1518,65 +1772,101 @@ defmodule Graphism do
     end
   end
 
-  defp graphql_object(e, _schema, opts) do
+  defp graphql_attribute_fields(e, _schema, opts \\ []) do
+    e[:attributes]
+    |> Enum.reject(fn attr ->
+      Enum.member?(opts[:skip] || [], attr[:name])
+    end)
+    |> Enum.reject(&private?(&1))
+    |> Enum.map(fn attr ->
+      # determine the kind for this field, depending
+      # on whether it is an enum or not
+      kind = attr_graphql_type(e, attr)
+
+      kind =
+        case attr[:opts][:allow] do
+          nil ->
+            quote do
+              non_null(unquote(kind))
+            end
+
+          _ ->
+            kind
+        end
+
+      quote do
+        field(unquote(attr[:name]), unquote(kind))
+      end
+    end)
+  end
+
+  defp graphql_relation_fields(e, _schema, opts) do
+    e[:relations]
+    |> Enum.reject(fn rel ->
+      Enum.member?(opts[:skip] || [], rel[:target])
+    end)
+    |> Enum.map(fn rel ->
+      kind =
+        case {rel[:kind], rel[:opts][:allow]} do
+          {:has_many, nil} ->
+            quote do
+              list_of(unquote(rel[:target]))
+            end
+
+          {:has_many, _} ->
+            quote do
+              list_of(non_null(unquote(rel[:target])))
+            end
+
+          {_, nil} ->
+            quote do
+              non_null(unquote(rel[:target]))
+            end
+
+          {_, _} ->
+            quote do
+              unquote(rel[:target])
+            end
+        end
+
+      case opts[:mode] do
+        :input ->
+          case optional?(rel) do
+            false ->
+              quote do
+                field(
+                  unquote(rel[:name]),
+                  non_null(:id)
+                )
+              end
+
+            true ->
+              quote do
+                field(
+                  unquote(rel[:name]),
+                  :id
+                )
+              end
+          end
+
+        _ ->
+          quote do
+            field(
+              unquote(rel[:name]),
+              unquote(kind),
+              resolve: dataloader(unquote(opts[:caller]).Dataloader.Repo)
+            )
+          end
+      end
+    end)
+  end
+
+  defp graphql_object(e, schema, opts) do
     quote do
       object unquote(e[:name]) do
         (unquote_splicing(
-           # Add a field for each attribute.
-           (e[:attributes]
-            |> Enum.reject(&private?(&1))
-            |> Enum.map(fn attr ->
-              # determine the kind for this field, depending
-              # on whether it is an enum or not
-              kind = attr_graphql_type(e, attr)
-
-              kind =
-                case attr[:opts][:allow] do
-                  nil ->
-                    quote do
-                      non_null(unquote(kind))
-                    end
-
-                  _ ->
-                    kind
-                end
-
-              quote do
-                field(unquote(attr[:name]), unquote(kind))
-              end
-            end)) ++
-             Enum.map(e[:relations], fn rel ->
-               kind =
-                 case {rel[:kind], rel[:opts][:allow]} do
-                   {:has_many, nil} ->
-                     quote do
-                       list_of(unquote(rel[:target]))
-                     end
-
-                   {:has_many, _} ->
-                     quote do
-                       list_of(non_null(unquote(rel[:target])))
-                     end
-
-                   {_, nil} ->
-                     quote do
-                       non_null(unquote(rel[:target]))
-                     end
-
-                   {_, _} ->
-                     quote do
-                       unquote(rel[:target])
-                     end
-                 end
-
-               quote do
-                 field(
-                   unquote(rel[:name]),
-                   unquote(kind),
-                   resolve: dataloader(unquote(opts[:caller]).Dataloader.Repo)
-                 )
-               end
-             end)
+           graphql_attribute_fields(e, schema, opts) ++
+             graphql_relation_fields(e, schema, opts)
          ))
       end
     end
@@ -1738,6 +2028,29 @@ defmodule Graphism do
     end)
   end
 
+  defp graphql_input_types(e, schema) do
+    e[:relations]
+    |> Enum.filter(fn rel -> :has_many == rel[:kind] && inline_relation?(rel, :create) end)
+    |> Enum.map(fn rel ->
+      target = find_entity!(schema, rel[:target])
+      input_type = String.to_atom("#{target[:name]}_input")
+
+      quote do
+        input_object unquote(input_type) do
+          (unquote_splicing(
+             graphql_attribute_fields(target, schema, skip: [:id]) ++
+               graphql_relation_fields(target, schema,
+                 mode: :input,
+                 skip: [
+                   e[:name]
+                 ]
+               )
+           ))
+        end
+      end
+    end)
+  end
+
   defp graphql_mutations(e, schema) do
     case mutations?(e) do
       false ->
@@ -1780,6 +2093,10 @@ defmodule Graphism do
     quote do
       &(unquote(e[:resolver_module]).unquote(action) / 3)
     end
+  end
+
+  defp inline_relation?(rel, action) do
+    Enum.member?(rel[:opts][:inline] || [], action)
   end
 
   defp graphql_create_mutation(e, _schema) do
@@ -1825,6 +2142,17 @@ defmodule Graphism do
              |> Enum.map(fn rel ->
                quote do
                  arg(unquote(rel[:name]), non_null(:id))
+               end
+             end)) ++
+            (e[:relations]
+             |> Enum.filter(fn rel ->
+               :has_many == rel[:kind] && inline_relation?(rel, :create)
+             end)
+             |> Enum.map(fn rel ->
+               input_type = String.to_atom("#{rel[:target]}_input")
+
+               quote do
+                 arg(unquote(rel[:name]), list_of(non_null(unquote(input_type))))
                end
              end))
         )

@@ -127,7 +127,7 @@ defmodule Graphism.Migrations do
   defp column_opts_from_relation(rel, index) do
     target = entity!(index, rel[:target])
     referenced_tabled = target[:table]
-    [null: false, references: referenced_tabled]
+    [null: optional?(rel), references: referenced_tabled]
   end
 
   defp column_opts_from_attribute(attr) do
@@ -470,7 +470,7 @@ defmodule Graphism.Migrations do
 
     enums =
       table
-      |> Map.get(:enums)
+      |> Map.get(:enums, %{})
       |> Map.put(enum, %{
         enum: enum,
         values: values
@@ -720,8 +720,11 @@ defmodule Graphism.Migrations do
       |> String.replace(",", " ")
       |> String.split(" ")
 
-    [table, _] = String.split(enum, "_")
-    table = String.to_atom(table)
+    table =
+      String.split(enum, "_")
+      |> Enum.drop(-1)
+      |> Enum.join("_")
+      |> String.to_atom()
 
     {String.to_atom(enum), table, Enum.map(values, &String.to_atom(&1))}
   end
@@ -945,7 +948,8 @@ defmodule Graphism.Migrations do
             {:add, [], [name, type, opts]}
 
           target_table ->
-            {:add, [], [name, {:references, [], [target_table, [type: :uuid]]}, [null: false]]}
+            nullable = opts[:null] || false
+            {:add, [], [name, {:references, [], [target_table, [type: :uuid]]}, [null: nullable]]}
         end
     end
   end
