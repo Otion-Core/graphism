@@ -1351,19 +1351,11 @@ defmodule Graphism do
       |> with_resolver_custom_funs(e, schema, api_module)
       |> List.flatten()
 
-    ast =
-      quote do
-        defmodule unquote(e[:resolver_module]) do
-          (unquote_splicing(resolver_funs))
-        end
+    quote do
+      defmodule unquote(e[:resolver_module]) do
+        (unquote_splicing(resolver_funs))
       end
-
-    File.write(
-      "/Users/pedrogutierrez/Desktop/#{e[:name]}.ex",
-      ast |> Macro.to_string() |> Code.format_string!()
-    )
-
-    ast
+    end
   end
 
   defp api_module(e, schema, opts) do
