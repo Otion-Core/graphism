@@ -182,7 +182,7 @@ defmodule Graphism do
 
     resolver_modules =
       Enum.map(schema, fn e ->
-        resolver_module(e, schema, caller: __CALLER__)
+        resolver_module(e, schema, repo: repo, caller: __CALLER__)
       end)
 
     enums =
@@ -982,11 +982,11 @@ defmodule Graphism do
                      children = Map.fetch!(args, unquote(rel[:name]))
                      # for now we are assuming this is a list of children,
                      # but we will need to add support for has_one kind of relations too
-                     # the most generic case being a list, we will treat both kinds of 
+                     # the most generic case being a list, we will treat both kinds of
                      # relation with the same logic
                      Enum.reduce_while(children, :ok, fn child, _ ->
-                       # populate the parent relation 
-                       # and delete to the child entity resolver 
+                       # populate the parent relation
+                       # and delete to the child entity resolver
                        child =
                          Map.put(
                            child,
@@ -1185,7 +1185,7 @@ defmodule Graphism do
     end
   end
 
-  defp with_resolver_create_fun(funs, e, schema, api_module) do
+  defp with_resolver_create_fun(funs, e, schema, api_module, opts) do
     with_entity_funs(funs, e, :create, fn ->
       inlined_children = inlined_children_for_action(e, :create)
 
@@ -1241,20 +1241,25 @@ defmodule Graphism do
                         unquote(names(children))
                       )
 
-                    with {:ok, unquote(var(e))} <-
-                           unquote(api_module).create(
-                             unquote_splicing(
-                               (e |> parent_relations() |> names() |> vars()) ++ [var(:args)]
-                             )
-                           ),
-                         :ok <-
-                           create_inline_relations(
-                             unquote(var(e)),
-                             children_args,
-                             %{parent: parent, resolution: resolution}
-                           ) do
-                      {:ok, unquote(var(e))}
-                    end
+                    unquote(opts[:repo]).transaction(fn ->
+                      with {:ok, unquote(var(e))} <-
+                             unquote(api_module).create(
+                               unquote_splicing(
+                                 (e |> parent_relations() |> names() |> vars()) ++ [var(:args)]
+                               )
+                             ),
+                           :ok <-
+                             create_inline_relations(
+                               unquote(var(e)),
+                               children_args,
+                               %{parent: parent, resolution: resolution}
+                             ) do
+                        unquote(var(e))
+                      else
+                        {:error, changeset} ->
+                          unquote(opts[:repo]).rollback(changeset)
+                      end
+                    end)
                   end
               end
             )
@@ -1336,7 +1341,7 @@ defmodule Graphism do
     end
   end
 
-  defp resolver_module(e, schema, _) do
+  defp resolver_module(e, schema, opts) do
     api_module = e[:api_module]
 
     resolver_funs =
@@ -1345,7 +1350,7 @@ defmodule Graphism do
       |> with_resolver_inlined_relations_funs(e, schema, api_module)
       |> with_resolver_list_funs(e, schema, api_module)
       |> with_resolver_read_funs(e, schema, api_module)
-      |> with_resolver_create_fun(e, schema, api_module)
+      |> with_resolver_create_fun(e, schema, api_module, opts)
       |> with_resolver_update_fun(e, schema, api_module)
       |> with_resolver_delete_fun(e, schema, api_module)
       |> with_resolver_custom_funs(e, schema, api_module)
