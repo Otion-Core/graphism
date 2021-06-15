@@ -972,14 +972,8 @@ defmodule Graphism do
                  resolver_module = target[:resolver_module]
                  parent_rel = find_relation_by_kind_and_target!(target, :belongs_to, e[:name])
 
-                 quote do
-                   defp create_inline_relation(
-                          unquote(Macro.var(e[:name], nil)),
-                          args,
-                          unquote(rel[:name]),
-                          graphql
-                        ) do
-                     children = Map.fetch!(args, unquote(rel[:name]))
+                 children_rels_create =
+                   quote do
                      # for now we are assuming this is a list of children,
                      # but we will need to add support for has_one kind of relations too
                      # the most generic case being a list, we will treat both kinds of
@@ -1006,6 +1000,35 @@ defmodule Graphism do
                            {:halt, {:error, e}}
                        end
                      end)
+                   end
+
+                 quote do
+                   defp create_inline_relation(
+                          unquote(Macro.var(e[:name], nil)),
+                          args,
+                          unquote(rel[:name]),
+                          graphql
+                        ) do
+                     unquote(
+                       case optional?(rel) do
+                         true ->
+                           quote do
+                             case Map.get(args, unquote(rel[:name]), nil) do
+                               nil ->
+                                 :ok
+
+                               children ->
+                                 unquote(children_rels_create)
+                             end
+                           end
+
+                         false ->
+                           quote do
+                             children = Map.fetch!(args, unquote(rel[:name]))
+                             unquote(children_rels_create)
+                           end
+                       end
+                     )
                    end
                  end
                end)
