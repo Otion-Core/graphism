@@ -1806,8 +1806,15 @@ defmodule Graphism do
       kind =
         case attr[:opts][:allow] do
           nil ->
-            quote do
-              non_null(unquote(kind))
+            case optional?(attr) do
+              true ->
+                quote do
+                  unquote(kind)
+                end
+              false ->
+                quote do
+                  non_null(unquote(kind))
+                end
             end
 
           _ ->
