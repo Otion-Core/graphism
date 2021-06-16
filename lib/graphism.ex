@@ -683,7 +683,7 @@ defmodule Graphism do
 
           unquote_splicing(
             e[:attributes]
-            |> Enum.filter(fn attr -> attr[:opts][:unique] end)
+            |> Enum.filter(&unique?(&1))
             |> Enum.map(fn attr ->
               quote do
                 changes =
@@ -756,7 +756,7 @@ defmodule Graphism do
           end
         end
         | e[:attributes]
-          |> Enum.filter(fn attr -> attr[:opts][:unique] end)
+          |> Enum.filter(&unique?(&1))
           |> Enum.map(fn attr ->
             attr_name = attr[:name]
             fun_name = String.to_atom("get_by_#{attr[:name]}")
@@ -1489,7 +1489,7 @@ defmodule Graphism do
         end
       end
       | e[:attributes]
-        |> Enum.filter(fn attr -> attr[:opts][:unique] end)
+        |> Enum.filter(&unique?(&1))
         |> Enum.map(fn attr ->
           quote do
             def unquote(String.to_atom("get_by_#{attr[:name]}"))(value) do
@@ -2004,7 +2004,7 @@ defmodule Graphism do
 
   defp graphql_query_find_by_unique_fields(e, _schema) do
     e[:attributes]
-    |> Enum.filter(fn attr -> Keyword.get(attr[:opts], :unique) end)
+    |> Enum.filter(&unique?(&1))
     |> Enum.map(fn attr ->
       kind = attr_graphql_type(e, attr)
 
@@ -2099,6 +2099,10 @@ defmodule Graphism do
 
   defp optional?(attr) do
     Enum.member?(attr[:opts][:modifiers] || [], :optional)
+  end
+
+  defp unique?(attr) do
+    Enum.member?(attr[:opts][:modifiers] || [], :unique)
   end
 
   def graphql_resolver(e, action) do

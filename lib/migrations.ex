@@ -86,7 +86,7 @@ defmodule Graphism.Migrations do
     # Inspect attributes and derive unique indices
     indices =
       e[:attributes]
-      |> Enum.filter(fn attr -> attr[:opts][:unique] end)
+      |> Enum.filter(&unique?(&1))
       |> Enum.reduce(%{}, fn attr, acc ->
         index = index_from_attribute(attr, e)
         Map.put(acc, index[:name], index)
@@ -149,6 +149,10 @@ defmodule Graphism.Migrations do
 
   defp optional?(attr) do
     Enum.member?(attr[:opts][:modifiers] || [], :optional)
+  end
+
+  defp unique?(attr) do
+    Enum.member?(attr[:opts][:modifiers] || [], :unique)
   end
 
   defp column_opts_with_null(opts, attr) do
@@ -277,7 +281,7 @@ defmodule Graphism.Migrations do
       columns:
         Enum.map(schema[name][:columns], fn {col, spec} ->
           # if the column matches an attribute that contains
-          # a one_of option, then we actually want to use 
+          # a one_of option, then we actually want to use
           # a database enum
           migration_from_column(col, spec, :add)
         end)
