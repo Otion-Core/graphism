@@ -802,23 +802,29 @@ defmodule Graphism do
   defp ancestor_auth_context(e, schema, context_var) do
     e
     |> parent_relations()
-    |> Enum.flat_map(fn rel ->
+    |> Enum.map(fn rel ->
       target = find_entity!(schema, rel[:target])
       parent_context_var = var(target)
 
-      [
-        quote do
-          unquote(parent_context_var) = unquote(context_var).unquote(rel[:name])
+      quote do
+        context =
+          case Map.get(context, unquote(target[:name]), nil) do
+            nil ->
+              unquote(parent_context_var) = unquote(context_var).unquote(rel[:name])
 
-          context =
-            Map.put(
-              context,
-              unquote(target[:name]),
-              unquote(parent_context_var)
-            )
-        end
-        | ancestor_auth_context(target, schema, parent_context_var)
-      ]
+              context =
+                Map.put(
+                  context,
+                  unquote(target[:name]),
+                  unquote(parent_context_var)
+                )
+
+              unquote_splicing(ancestor_auth_context(target, schema, parent_context_var))
+
+            _ ->
+              context
+          end
+      end
     end)
   end
 
@@ -871,6 +877,14 @@ defmodule Graphism do
                   true ->
                     [
                       quote do
+                        unquote(
+                          if action == :delete do
+                            quote do
+                              unquote(context_var) = unquote(var(e)).unquote(rel[:name])
+                            end
+                          end
+                        )
+
                         context =
                           case unquote(context_var) do
                             nil ->
@@ -895,6 +909,14 @@ defmodule Graphism do
                   false ->
                     [
                       quote do
+                        unquote(
+                          if action == :delete do
+                            quote do
+                              unquote(context_var) = unquote(var(e)).unquote(rel[:name])
+                            end
+                          end
+                        )
+
                         context =
                           Map.put(
                             context,
@@ -1911,8 +1933,7 @@ defmodule Graphism do
   end
 
   defp mutating_action?(name) do
-    name != :delete &&
-      !readonly_action?(name)
+    !readonly_action?(name)
   end
 
   defp action_names(e) do
