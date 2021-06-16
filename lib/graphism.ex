@@ -373,9 +373,7 @@ defmodule Graphism do
 
   defp validate_attribute_type!(type) do
     unless Enum.member?(@supported_attribute_types, type) do
-      raise "Unsupported attribute type #{inspect(type)}. Must be one of #{
-              inspect(@supported_attribute_types)
-            }"
+      raise "Unsupported attribute type #{inspect(type)}. Must be one of #{inspect(@supported_attribute_types)}"
     end
   end
 
@@ -539,9 +537,9 @@ defmodule Graphism do
               target = plurals[rel[:plural]]
 
               unless target do
-                raise "Entity #{e[:name]} has relation #{rel[:name]} of unknown type: #{
-                        inspect(Map.keys(plurals))
-                      }. Relation: #{inspect(rel)}"
+                raise "Entity #{e[:name]} has relation #{rel[:name]} of unknown type: #{inspect(Map.keys(plurals))}. Relation: #{
+                        inspect(rel)
+                      }"
               end
 
               rel
@@ -552,9 +550,7 @@ defmodule Graphism do
               target = index[rel[:name]]
 
               unless target do
-                raise "Entity #{e[:name]} has relation #{rel[:name]} of unknown type: #{
-                        inspect(Map.keys(index))
-                      }"
+                raise "Entity #{e[:name]} has relation #{rel[:name]} of unknown type: #{inspect(Map.keys(index))}"
               end
 
               rel
@@ -623,9 +619,7 @@ defmodule Graphism do
               target = find_entity!(schema, rel[:target])
 
               quote do
-                Ecto.Schema.belongs_to(unquote(rel[:name]), unquote(target[:schema_module]),
-                  type: :binary_id
-                )
+                Ecto.Schema.belongs_to(unquote(rel[:name]), unquote(target[:schema_module]), type: :binary_id)
               end
             end)
           )
@@ -675,6 +669,9 @@ defmodule Graphism do
                                 String.to_atom("#{rel[:name]}_id")
                               end))
                          )
+
+        def required_fields, do: @required_fields
+        def optional_fields, do: @optional_fields
 
         def changeset(e, attrs) do
           changes =
@@ -1146,9 +1143,7 @@ defmodule Graphism do
                 case optional?(rel) do
                   false ->
                     quote do
-                      unquote(target[:api_module]).get_by_id(
-                        unquote(var(:args)).unquote(rel[:name])
-                      )
+                      unquote(target[:api_module]).get_by_id(unquote(var(:args)).unquote(rel[:name]))
                     end
 
                   true ->
@@ -1248,9 +1243,7 @@ defmodule Graphism do
                 [] ->
                   quote do
                     unquote(api_module).create(
-                      unquote_splicing(
-                        (e |> parent_relations() |> names() |> vars()) ++ [var(:args)]
-                      )
+                      unquote_splicing((e |> parent_relations() |> names() |> vars()) ++ [var(:args)])
                     )
                   end
 
@@ -1267,9 +1260,7 @@ defmodule Graphism do
                     unquote(opts[:repo]).transaction(fn ->
                       with {:ok, unquote(var(e))} <-
                              unquote(api_module).create(
-                               unquote_splicing(
-                                 (e |> parent_relations() |> names() |> vars()) ++ [var(:args)]
-                               )
+                               unquote_splicing((e |> parent_relations() |> names() |> vars()) ++ [var(:args)])
                              ),
                            :ok <-
                              create_inline_relations(
@@ -1308,9 +1299,7 @@ defmodule Graphism do
                  |> without_nils()
                ) do
             unquote(api_module).update(
-              unquote_splicing(
-                (e |> parent_relations() |> names() |> vars()) ++ [var(e), var(:args)]
-              )
+              unquote_splicing((e |> parent_relations() |> names() |> vars()) ++ [var(e), var(:args)])
             )
           end
         end
@@ -1449,10 +1438,7 @@ defmodule Graphism do
             def unquote(String.to_atom("list_by_#{rel[:name]}"))(id, context) do
               query =
                 from(unquote(Macro.var(rel[:name], nil)) in unquote(schema_module),
-                  where:
-                    unquote(Macro.var(rel[:name], nil)).unquote(
-                      String.to_atom("#{rel[:name]}_id")
-                    ) == ^id
+                  where: unquote(Macro.var(rel[:name], nil)).unquote(String.to_atom("#{rel[:name]}_id")) == ^id
                 )
 
               unquote(
@@ -1632,7 +1618,7 @@ defmodule Graphism do
                       case optional?(rel) do
                         true ->
                           quote do
-                            case Map.get(attrs, unquote(var(rel)), nil) do
+                            case unquote(var(rel)) do
                               nil ->
                                 nil
 
@@ -1763,9 +1749,7 @@ defmodule Graphism do
            name == e[:name]
          end) do
       [] ->
-        raise "Could not resolve entity #{name}: #{
-                inspect(Enum.map(schema, fn e -> e[:name] end))
-              }"
+        raise "Could not resolve entity #{name}: #{inspect(Enum.map(schema, fn e -> e[:name] end))}"
 
       [e] ->
         e
@@ -1811,6 +1795,7 @@ defmodule Graphism do
                 quote do
                   unquote(kind)
                 end
+
               false ->
                 quote do
                   non_null(unquote(kind))
@@ -1833,26 +1818,30 @@ defmodule Graphism do
       Enum.member?(opts[:skip] || [], rel[:target])
     end)
     |> Enum.map(fn rel ->
+      optional =
+        optional?(rel) ||
+          rel[:opts][:allow] != nil
+
       kind =
-        case {rel[:kind], rel[:opts][:allow]} do
-          {:has_many, nil} ->
+        case {rel[:kind], optional} do
+          {:has_many, true} ->
             quote do
               list_of(unquote(rel[:target]))
             end
 
-          {:has_many, _} ->
+          {:has_many, false} ->
             quote do
               list_of(non_null(unquote(rel[:target])))
             end
 
-          {_, nil} ->
-            quote do
-              non_null(unquote(rel[:target]))
-            end
-
-          {_, _} ->
+          {_, true} ->
             quote do
               unquote(rel[:target])
+            end
+
+          {_, false} ->
+            quote do
+              non_null(unquote(rel[:target]))
             end
         end
 
@@ -2027,9 +2016,7 @@ defmodule Graphism do
               unquote(e[:name]) do
           arg(unquote(attr[:name]), non_null(unquote(kind)))
 
-          resolve(
-            &(unquote(e[:resolver_module]).unquote(String.to_atom("get_by_#{attr[:name]}")) / 3)
-          )
+          resolve(&(unquote(e[:resolver_module]).unquote(String.to_atom("get_by_#{attr[:name]}")) / 3))
         end
       end
     end)
@@ -2047,9 +2034,7 @@ defmodule Graphism do
               list_of(unquote(e[:name])) do
           arg(unquote(rel[:name]), non_null(:id))
 
-          resolve(
-            &(unquote(e[:resolver_module]).unquote(String.to_atom("list_by_#{rel[:name]}")) / 3)
-          )
+          resolve(&(unquote(e[:resolver_module]).unquote(String.to_atom("list_by_#{rel[:name]}")) / 3))
         end
       end
     end)

@@ -658,9 +658,7 @@ defmodule Graphism.Migrations do
 
   defp parse_up(other) do
     Logger.warn(
-      "Unable to parse migration code #{inspect(other)}: #{
-        other |> Macro.to_string() |> Code.format_string!()
-      }"
+      "Unable to parse migration code #{inspect(other)}: #{other |> Macro.to_string() |> Code.format_string!()}"
     )
 
     []
