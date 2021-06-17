@@ -1372,35 +1372,25 @@ defmodule Graphism do
 
   defp with_resolver_update_fun(funs, e, schema, api_module) do
     with_entity_funs(funs, e, :update, fn ->
-      ast =
-        quote do
-          def update(_parent, unquote(var(:args)), %{context: context}) do
-            with unquote_splicing(
-                   [
-                     with_entity_fetch(e),
-                     with_parent_entities_fetch(e, schema, mode: :update),
-                     with_args_without_parents(e),
-                     with_args_without_id(),
-                     with_should(e, :update)
-                   ]
-                   |> flat()
-                   |> without_nils()
-                 ) do
-              unquote(api_module).update(
-                unquote_splicing((e |> parent_relations() |> names() |> vars()) ++ [var(e), var(:args)])
-              )
-            end
+      quote do
+        def update(_parent, unquote(var(:args)), %{context: context}) do
+          with unquote_splicing(
+                 [
+                   with_entity_fetch(e),
+                   with_parent_entities_fetch(e, schema, mode: :update),
+                   with_args_without_parents(e),
+                   with_args_without_id(),
+                   with_should(e, :update)
+                 ]
+                 |> flat()
+                 |> without_nils()
+               ) do
+            unquote(api_module).update(
+              unquote_splicing((e |> parent_relations() |> names() |> vars()) ++ [var(e), var(:args)])
+            )
           end
         end
-
-      if e[:name] == :user do
-        ast
-        |> Macro.to_string()
-        |> Code.format_string!()
-        |> IO.puts()
       end
-
-      ast
     end)
   end
 
