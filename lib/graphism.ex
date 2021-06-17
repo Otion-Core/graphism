@@ -695,12 +695,16 @@ defmodule Graphism do
             e[:attributes]
             |> Enum.filter(&unique?(&1))
             |> Enum.map(fn attr ->
+              index_columns =
+                ((e[:opts][:scope] || [])
+                 |> Enum.map(fn rel -> String.to_atom("#{rel}_id") end)) ++ [attr[:name]]
+
               quote do
                 changes =
                   changes
                   |> unique_constraint(
                     unquote(attr[:name]),
-                    name: unquote("unique_#{attr[:name]}_per_#{e[:table]}")
+                    name: unquote("unique_#{Enum.join(index_columns, "_")}_in_#{e[:table]}")
                   )
               end
             end)
