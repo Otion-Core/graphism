@@ -1191,7 +1191,7 @@ defmodule Graphism do
   # Builds a series of with clauses that fetch entity parent
   # dependencies required in order to either create or update
   # the entity
-  defp with_parent_entities_fetch(e, schema) do
+  defp with_parent_entities_fetch(e, schema, opts \\ []) do
     e
     |> parent_relations()
     |> Enum.map(fn rel ->
@@ -1215,8 +1215,22 @@ defmodule Graphism do
               unquote(
                 case optional?(rel) do
                   false ->
-                    quote do
-                      unquote(target[:api_module]).get_by_id(unquote(var(:args)).unquote(rel[:name]))
+                    case opts[:mode] do
+                      nil ->
+                        quote do
+                          unquote(target[:api_module]).get_by_id(unquote(var(:args)).unquote(rel[:name]))
+                        end
+
+                      :update ->
+                        quote do
+                          case Map.get(unquote(var(:args)), unquote(rel[:name]), nil) do
+                            nil ->
+                              {:ok, unquote(var(e)).unquote(rel[:name])}
+
+                            id ->
+                              unquote(target[:api_module]).get_by_id(id)
+                          end
+                        end
                     end
 
                   true ->
@@ -1358,25 +1372,35 @@ defmodule Graphism do
 
   defp with_resolver_update_fun(funs, e, schema, api_module) do
     with_entity_funs(funs, e, :update, fn ->
-      quote do
-        def update(_parent, unquote(var(:args)), %{context: context}) do
-          with unquote_splicing(
-                 [
-                   with_entity_fetch(e),
-                   with_parent_entities_fetch(e, schema),
-                   with_args_without_parents(e),
-                   with_args_without_id(),
-                   with_should(e, :update)
-                 ]
-                 |> flat()
-                 |> without_nils()
-               ) do
-            unquote(api_module).update(
-              unquote_splicing((e |> parent_relations() |> names() |> vars()) ++ [var(e), var(:args)])
-            )
+      ast =
+        quote do
+          def update(_parent, unquote(var(:args)), %{context: context}) do
+            with unquote_splicing(
+                   [
+                     with_entity_fetch(e),
+                     with_parent_entities_fetch(e, schema, mode: :update),
+                     with_args_without_parents(e),
+                     with_args_without_id(),
+                     with_should(e, :update)
+                   ]
+                   |> flat()
+                   |> without_nils()
+                 ) do
+              unquote(api_module).update(
+                unquote_splicing((e |> parent_relations() |> names() |> vars()) ++ [var(e), var(:args)])
+              )
+            end
           end
         end
+
+      if e[:name] == :user do
+        ast
+        |> Macro.to_string()
+        |> Code.format_string!()
+        |> IO.puts()
       end
+
+      ast
     end)
   end
 
