@@ -327,6 +327,7 @@ defmodule Graphism do
       |> with_api_module(caller_module)
       |> with_resolver_module(caller_module)
       |> with_enums()
+      |> maybe_with_scope()
 
     Module.put_attribute(__CALLER__.module, :schema, entity)
     block
@@ -429,6 +430,15 @@ defmodule Graphism do
       name,
       module_name
     )
+  end
+
+  defp maybe_with_scope(entity) do
+    (entity[:opts][:scope] || [])
+    |> Enum.each(fn name ->
+      relation!(entity, name)
+    end)
+
+    entity
   end
 
   # Inspect attributes and extract enum types from those attributes
@@ -764,10 +774,13 @@ defmodule Graphism do
             quote do
               def unquote(fun_name)(
                     _,
-                    %{unquote(attr_name) => arg} = args,
+                    args,
                     %{context: context}
                   ) do
-                with unquote_splicing([with_entity_fetch(e, attr_name), with_should(e, :read)]) do
+                with unquote_splicing([
+                       with_entity_fetch(e, attr_name),
+                       with_should(e, :read)
+                     ]) do
                   {:ok, unquote(var(e))}
                 end
               end
@@ -775,6 +788,25 @@ defmodule Graphism do
           end)
       ]
     end)
+  end
+
+  defp relation!(e, name) do
+    rel =
+      e[:relations]
+      |> Enum.find(fn rel ->
+        rel[:name] == name
+      end)
+
+    unless rel do
+      relations =
+        Enum.map(e[:relations], fn rel ->
+          rel[:name]
+        end)
+
+      raise "no such relation #{name} in entity #{e[:name]}. Existing relations: #{inspect(relations)}"
+    end
+
+    rel
   end
 
   defp find_relation_by_kind_and_target!(e, kind, target) do
@@ -856,105 +888,112 @@ defmodule Graphism do
 
     fun_name = String.to_atom("should_#{action}?")
 
-    quote do
-      def unquote(fun_name)(
-            unquote_splicing(auth_fun_entities_args(e, action)),
-            args,
-            context
-          ) do
-        context = Map.drop(context, [:__absinthe_plug__, :loader, :pubsub])
+    ancestors_context =
+      case action == :create || action == :update || action == :delete do
+        true ->
+          e
+          |> parent_relations()
+          |> Enum.flat_map(fn rel ->
+            target = find_entity!(schema, rel[:target])
+            context_var = var(rel)
 
-        unquote_splicing(
-          case mutating_action?(action) do
-            true ->
-              e
-              |> parent_relations()
-              |> Enum.flat_map(fn rel ->
-                target = find_entity!(schema, rel[:target])
-                context_var = var(rel)
+            context_var_on_delete =
+              case action == :delete do
+                true ->
+                  quote do
+                    unquote(context_var) = unquote(var(e)).unquote(rel[:name])
+                  end
 
-                case optional?(rel) do
-                  true ->
-                    [
-                      quote do
-                        unquote(
-                          if action == :delete do
-                            quote do
-                              unquote(context_var) = unquote(var(e)).unquote(rel[:name])
-                            end
-                          end
-                        )
+                false ->
+                  nil
+              end
 
-                        context =
-                          case unquote(context_var) do
-                            nil ->
-                              context
+            relation_context =
+              quote do
+                context =
+                  Map.put(
+                    context,
+                    unquote(target[:name]),
+                    unquote(context_var)
+                  )
+              end
 
-                            _ ->
-                              (unquote_splicing([
-                                 quote do
-                                   context =
-                                     Map.put(
-                                       context,
-                                       unquote(target[:name]),
-                                       unquote(context_var)
-                                     )
-                                 end
-                                 | ancestor_auth_context(target, schema, context_var)
-                               ]))
-                          end
+            relation_context_with_ancestors = [relation_context | ancestor_auth_context(target, schema, context_var)]
+
+            optional_relation_context_with_ancestors =
+              case optional?(rel) do
+                true ->
+                  quote do
+                    context =
+                      case unquote(context_var) do
+                        nil ->
+                          context
+
+                        _ ->
+                          (unquote_splicing(relation_context_with_ancestors))
                       end
-                    ]
+                  end
 
-                  false ->
-                    [
-                      quote do
-                        unquote(
-                          if action == :delete do
-                            quote do
-                              unquote(context_var) = unquote(var(e)).unquote(rel[:name])
-                            end
-                          end
-                        )
+                false ->
+                  relation_context_with_ancestors
+              end
 
-                        context =
-                          Map.put(
-                            context,
-                            unquote(target[:name]),
-                            unquote(context_var)
-                          )
-                      end
-                      | ancestor_auth_context(target, schema, context_var)
-                    ]
-                end
-              end)
+            [
+              context_var_on_delete,
+              optional_relation_context_with_ancestors
+            ]
+            |> flat()
+            |> without_nils()
+          end)
 
-            false ->
-              []
+        false ->
+          nil
+      end
+
+    entity_context =
+      case action == :update || action == :delete do
+        true ->
+          quote do
+            context = Map.put(context, unquote(e[:name]), unquote(var(e)))
           end
-        )
 
-        # if we are updating an entity, then put it also
-        # in the authorization context
-        unquote_splicing(
-          case action == :update || action == :delete do
-            true ->
-              [
-                quote do
-                  context = Map.put(context, unquote(e[:name]), unquote(var(e)))
-                end
-              ]
+        false ->
+          nil
+      end
 
-            false ->
-              []
-          end
-        )
+    allow =
+      quote do
+        case unquote(mod).allow?(args, context) do
+          true ->
+            true
 
-        with false <- unquote(mod).allow?(args, context) do
-          {:error, :unauthorized}
+          false ->
+            {:error, :unauthorized}
         end
       end
-    end
+
+    ast =
+      quote do
+        def unquote(fun_name)(
+              unquote_splicing(auth_fun_entities_args(e, action)),
+              args,
+              context
+            ) do
+          context = Map.drop(context, [:__absinthe_plug__, :loader, :pubsub])
+
+          unquote_splicing(
+            [
+              ancestors_context,
+              entity_context,
+              allow
+            ]
+            |> flat()
+            |> without_nils()
+          )
+        end
+      end
+
+    ast
   end
 
   defp with_resolver_inlined_relations_funs(funs, e, schema, _api_module) do
@@ -1131,9 +1170,17 @@ defmodule Graphism do
   defp with_entity_fetch(e, attr) do
     fun_name = String.to_atom("get_by_#{attr}")
 
+    args =
+      ((e[:opts][:scope] || []) ++ [attr])
+      |> Enum.map(fn arg ->
+        quote do
+          args.unquote(arg)
+        end
+      end)
+
     quote do
       {:ok, unquote(var(e))} <-
-        unquote(e[:api_module]).unquote(fun_name)(arg)
+        unquote(e[:api_module]).unquote(fun_name)(unquote_splicing(args))
     end
   end
 
@@ -1513,19 +1560,49 @@ defmodule Graphism do
       | e[:attributes]
         |> Enum.filter(&unique?(&1))
         |> Enum.map(fn attr ->
+          scope_args =
+            (e[:opts][:scope] || [])
+            |> Enum.map(fn rel ->
+              var(rel)
+            end)
+
+          args =
+            scope_args ++
+              [
+                var(attr)
+              ]
+
           quote do
-            def unquote(String.to_atom("get_by_#{attr[:name]}"))(value) do
+            def unquote(String.to_atom("get_by_#{attr[:name]}"))(unquote_splicing(args)) do
               value =
-                case is_atom(value) do
+                case is_atom(unquote(var(attr))) do
                   true ->
-                    "#{value}"
+                    "#{unquote(var(attr))}"
 
                   false ->
-                    value
+                    unquote(var(attr))
                 end
 
+              filters = [
+                unquote_splicing(
+                  ((e[:opts][:scope] || [])
+                   |> Enum.map(fn arg ->
+                     column_name = String.to_atom("#{arg}_id")
+
+                     quote do
+                       {unquote(column_name), unquote(var(arg))}
+                     end
+                   end)) ++
+                    [
+                      quote do
+                        {unquote(attr[:name]), value}
+                      end
+                    ]
+                )
+              ]
+
               case unquote(schema_module)
-                   |> unquote(repo_module).get_by([{unquote(attr[:name]), value}])
+                   |> unquote(repo_module).get_by(filters)
                    |> unquote(repo_module).preload(unquote(entity_read_preloads(e, schema))) do
                 nil ->
                   {:error, :not_found}
@@ -1932,10 +2009,6 @@ defmodule Graphism do
     Enum.member?(@readonly_actions, name)
   end
 
-  defp mutating_action?(name) do
-    !readonly_action?(name)
-  end
-
   defp action_names(e) do
     (e[:actions] ++ e[:custom_actions])
     |> Enum.map(fn {name, _} -> name end)
@@ -2016,7 +2089,7 @@ defmodule Graphism do
     quote do
       @desc "Find a single " <> unquote("#{e[:display_name]}") <> " given its unique id"
       field :by_id,
-            unquote(e[:name]) do
+            non_null(unquote(e[:name])) do
         arg(:id, non_null(:id))
         resolve(&unquote(e[:resolver_module]).get_by_id/3)
       end
@@ -2028,15 +2101,34 @@ defmodule Graphism do
     |> Enum.filter(&unique?(&1))
     |> Enum.map(fn attr ->
       kind = attr_graphql_type(e, attr)
+      description = "Find a single #{e[:display_name]} given its unique #{attr[:name]}"
+
+      {scope_args, description} =
+        case e[:opts][:scope] do
+          nil ->
+            {[], description}
+
+          rels ->
+            {Enum.map(rels, fn name ->
+               quote do
+                 arg(unquote(name), non_null(:id))
+               end
+             end), "#{description}. This query is scoped by #{rels |> Enum.join(",")}."}
+        end
+
+      args =
+        scope_args ++
+          [
+            quote do
+              arg(unquote(attr[:name]), non_null(unquote(kind)))
+            end
+          ]
 
       quote do
-        @desc "Find a single " <>
-                unquote("#{e[:display_name]}") <>
-                " given its unique " <> unquote("#{attr[:name]}")
+        @desc unquote(description)
         field unquote(String.to_atom("by_#{attr[:name]}")),
-              unquote(e[:name]) do
-          arg(unquote(attr[:name]), non_null(unquote(kind)))
-
+              non_null(unquote(e[:name])) do
+          unquote_splicing(args)
           resolve(&(unquote(e[:resolver_module]).unquote(String.to_atom("get_by_#{attr[:name]}")) / 3))
         end
       end

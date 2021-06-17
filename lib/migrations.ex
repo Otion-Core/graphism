@@ -120,8 +120,12 @@ defmodule Graphism.Migrations do
     e
   end
 
-  defp column_name_from_relation(rel) do
-    String.to_atom("#{rel[:name]}_id")
+  defp column_name_from_relation(name) when is_atom(name) do
+    String.to_atom("#{name}_id")
+  end
+
+  defp column_name_from_relation(rel) when is_list(rel) do
+    column_name_from_relation(rel[:name])
   end
 
   defp column_opts_from_relation(rel, index) do
@@ -208,9 +212,24 @@ defmodule Graphism.Migrations do
   end
 
   defp index_from_attribute(attr, e) do
-    column_name = column_name_from_attribute(attr)
-    index_name = String.to_atom("unique_#{column_name}_per_#{e[:table]}")
-    [table: e[:table], name: index_name, columns: [column_name]]
+    case e[:opts][:scope] do
+      nil ->
+        column_name = column_name_from_attribute(attr)
+        index_for(e, [column_name])
+
+      rels ->
+        scope_columns = Enum.map(rels, &column_name_from_relation(&1))
+        column_name = column_name_from_attribute(attr)
+
+        index_for(e, scope_columns ++ [column_name])
+    end
+  end
+
+  defp index_for(e, columns) do
+    table = e[:table]
+    column_names = Enum.join(columns, "_")
+    index_name = String.to_atom("unique_#{column_names}_in_#{table}")
+    [table: table, name: index_name, columns: columns]
   end
 
   defp enum_name(e, attr) do
