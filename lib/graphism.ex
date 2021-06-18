@@ -756,19 +756,23 @@ defmodule Graphism do
     end
   end
 
+  defp entity_by_id_resolver_fun(e) do
+    quote do
+      def get_by_id(_, args, %{context: context}) do
+        with unquote_splicing([
+               with_entity_fetch(e),
+               with_should(e, :read)
+             ]) do
+          {:ok, unquote(var(e))}
+        end
+      end
+    end
+  end
+
   defp with_resolver_read_funs(funs, e, _schema, _api_module) do
     with_entity_funs(funs, e, :read, fn ->
       [
-        quote do
-          def get_by_id(_, %{id: id} = args, %{context: context}) do
-            with unquote_splicing([
-                   with_entity_fetch(e),
-                   with_should(e, :read)
-                 ]) do
-              {:ok, unquote(var(e))}
-            end
-          end
-        end
+        entity_by_id_resolver_fun(e)
         | e[:attributes]
           |> Enum.filter(&unique?(&1))
           |> Enum.map(fn attr ->
@@ -831,11 +835,89 @@ defmodule Graphism do
   end
 
   defp with_resolver_auth_funs(funs, e, schema) do
+    action_resolver_auth_funs =
+      (e[:actions] ++ e[:custom_actions])
+      |> Enum.reject(fn {name, _} -> name == :list end)
+      |> Enum.map(fn {name, opts} ->
+        resolver_auth_fun(name, opts, e, schema)
+      end)
+
     funs ++
-      ((e[:actions] ++ e[:custom_actions])
-       |> Enum.map(fn {name, opts} ->
-         resolver_auth_fun(name, opts, e, schema)
-       end))
+      ([
+         action_resolver_auth_funs,
+         resolver_list_auth_funs(e, schema)
+       ]
+       |> flat()
+       |> without_nils())
+  end
+
+  defp resolver_list_auth_funs(e, schema) do
+    e[:actions]
+    |> Enum.filter(fn {action, _opts} -> action == :list end)
+    |> Enum.flat_map(fn {_, opts} ->
+      [
+        resolver_list_all_auth_fun(e, opts, schema),
+        resolver_list_by_parent_auth_funs(e, opts, schema)
+      ]
+    end)
+  end
+
+  defp simple_auth_context() do
+    quote do
+      context = Map.drop(context, [:__absinthe_plug__, :loader, :pubsub])
+    end
+  end
+
+  defp auth_mod_invocation(mod) do
+    quote do
+      case unquote(mod).allow?(args, context) do
+        true ->
+          true
+
+        false ->
+          {:error, :unauthorized}
+      end
+    end
+  end
+
+  defp resolver_list_all_auth_fun(e, opts, _schema) do
+    mod = opts[:allow]
+
+    unless mod do
+      raise "missing :allow option in entity #{e[:name]} for action :list"
+    end
+
+    quote do
+      defp should_list?(args, context) do
+        (unquote_splicing([simple_auth_context(), auth_mod_invocation(mod)]))
+      end
+    end
+  end
+
+  defp resolver_list_by_parent_auth_funs(e, opts, _schema) do
+    mod = opts[:allow]
+
+    unless mod do
+      raise "missing :allow option in entity #{e[:name]} for action :list"
+    end
+
+    e
+    |> parent_relations()
+    |> Enum.map(fn rel ->
+      fun_name = String.to_atom("should_list_by_#{rel[:name]}?")
+
+      ast =
+        quote do
+          defp unquote(fun_name)(unquote(var(rel)) = args, context) do
+            (unquote_splicing([
+               simple_auth_context(),
+               auth_mod_invocation(mod)
+             ]))
+          end
+        end
+
+      ast
+    end)
   end
 
   defp ancestor_auth_context(e, schema, context_var) do
@@ -886,6 +968,61 @@ defmodule Graphism do
     end
   end
 
+  defp parent_auth_context(e, rel, schema, opts) do
+    target = find_entity!(schema, rel[:target])
+    context_var = var(rel)
+
+    context_var_from_entity =
+      case opts[:context_var_from_entity] do
+        true ->
+          quote do
+            unquote(context_var) = unquote(var(e)).unquote(rel[:name])
+          end
+
+        false ->
+          nil
+      end
+
+    relation_context =
+      quote do
+        context =
+          Map.put(
+            context,
+            unquote(target[:name]),
+            unquote(context_var)
+          )
+      end
+
+    relation_context_with_ancestors = [
+      relation_context | ancestor_auth_context(target, schema, context_var)
+    ]
+
+    optional_relation_context_with_ancestors =
+      case optional?(rel) do
+        true ->
+          quote do
+            context =
+              case unquote(context_var) do
+                nil ->
+                  context
+
+                _ ->
+                  (unquote_splicing(relation_context_with_ancestors))
+              end
+          end
+
+        false ->
+          relation_context_with_ancestors
+      end
+
+    [
+      context_var_from_entity,
+      optional_relation_context_with_ancestors
+    ]
+    |> flat()
+    |> without_nils()
+  end
+
   defp resolver_auth_fun(action, opts, e, schema) do
     mod = opts[:allow]
 
@@ -896,69 +1033,19 @@ defmodule Graphism do
     fun_name = String.to_atom("should_#{action}?")
 
     ancestors_context =
-      case action == :create || action == :update || action == :delete do
+      case action == :create || action == :update || action == :delete || action == :read do
         true ->
-          e
-          |> parent_relations()
-          |> Enum.flat_map(fn rel ->
-            target = find_entity!(schema, rel[:target])
-            context_var = var(rel)
+          context_var_from_entity = action == :update || action == :delete || action == :read
 
-            context_var_on_delete =
-              case action == :delete do
-                true ->
-                  quote do
-                    unquote(context_var) = unquote(var(e)).unquote(rel[:name])
-                  end
-
-                false ->
-                  nil
-              end
-
-            relation_context =
-              quote do
-                context =
-                  Map.put(
-                    context,
-                    unquote(target[:name]),
-                    unquote(context_var)
-                  )
-              end
-
-            relation_context_with_ancestors = [relation_context | ancestor_auth_context(target, schema, context_var)]
-
-            optional_relation_context_with_ancestors =
-              case optional?(rel) do
-                true ->
-                  quote do
-                    context =
-                      case unquote(context_var) do
-                        nil ->
-                          context
-
-                        _ ->
-                          (unquote_splicing(relation_context_with_ancestors))
-                      end
-                  end
-
-                false ->
-                  relation_context_with_ancestors
-              end
-
-            [
-              context_var_on_delete,
-              optional_relation_context_with_ancestors
-            ]
-            |> flat()
-            |> without_nils()
-          end)
+          parent_relations(e)
+          |> Enum.flat_map(&parent_auth_context(e, &1, schema, context_var_from_entity: context_var_from_entity))
 
         false ->
           nil
       end
 
     entity_context =
-      case action == :update || action == :delete do
+      case action == :update || action == :delete || action == :read do
         true ->
           quote do
             context = Map.put(context, unquote(e[:name]), unquote(var(e)))
@@ -968,17 +1055,6 @@ defmodule Graphism do
           nil
       end
 
-    allow =
-      quote do
-        case unquote(mod).allow?(args, context) do
-          true ->
-            true
-
-          false ->
-            {:error, :unauthorized}
-        end
-      end
-
     ast =
       quote do
         def unquote(fun_name)(
@@ -986,17 +1062,16 @@ defmodule Graphism do
               args,
               context
             ) do
-          context = Map.drop(context, [:__absinthe_plug__, :loader, :pubsub])
-
-          unquote_splicing(
-            [
-              ancestors_context,
-              entity_context,
-              allow
-            ]
-            |> flat()
-            |> without_nils()
-          )
+          (unquote_splicing(
+             [
+               simple_auth_context(),
+               entity_context,
+               ancestors_context,
+               auth_mod_invocation(mod)
+             ]
+             |> flat()
+             |> without_nils()
+           ))
         end
       end
 
@@ -1104,7 +1179,7 @@ defmodule Graphism do
      |> without_nils) ++ funs
   end
 
-  defp with_resolver_list_funs(funs, e, _, api_module) do
+  defp with_resolver_list_funs(funs, e, schema, api_module) do
     with_entity_funs(funs, e, :list, fn ->
       [
         quote do
@@ -1117,18 +1192,18 @@ defmodule Graphism do
         | e
           |> parent_relations()
           |> Enum.map(fn rel ->
+            target = find_entity!(schema, rel[:target])
             fun_name = String.to_atom("list_by_#{rel[:name]}")
+            auth_fun_name = String.to_atom("should_list_by_#{rel[:name]}?")
 
             quote do
-              def unquote(fun_name)(
-                    _,
-                    %{unquote(rel[:name]) => arg} = args,
-                    %{context: context}
-                  ) do
-                with true <- should_list?(args, context) do
+              def unquote(fun_name)(_, args, %{context: context}) do
+                with {:ok, unquote(var(rel))} <-
+                       unquote(target[:api_module]).get_by_id(args.unquote(rel[:name])),
+                     true <- unquote(auth_fun_name)(unquote(var(rel)), context) do
                   {:ok,
                    unquote(api_module).unquote(fun_name)(
-                     arg,
+                     unquote(var(rel)).id,
                      context
                    )}
                 end
@@ -1465,7 +1540,7 @@ defmodule Graphism do
                  with_custom_parent_entities_fetch(e, opts, schema),
                  with_custom_args_with_parents(e, opts),
                  with_args_with_autogenerated_id?(),
-                 with_should(e, action),
+                 with_should(e, action)
                ]
                |> flat()
                |> without_nils()
