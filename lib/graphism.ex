@@ -2154,7 +2154,7 @@ defmodule Graphism do
       kind =
         case attr[:opts][:allow] do
           nil ->
-            case optional?(attr) || opts[:mode] == :update do
+            case optional?(attr) || (opts[:mode] == :update && attr[:name] != :id) do
               true ->
                 quote do
                   unquote(kind)
