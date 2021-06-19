@@ -247,7 +247,10 @@ defmodule Graphism do
       schema
       |> Enum.reject(&internal?(&1))
       |> Enum.flat_map(fn e ->
-        graphql_input_types(e, schema)
+        [
+          graphql_input_types(e, schema),
+          graphql_update_input_types(e, schema)
+        ]
       end)
       |> without_nils()
 
@@ -681,11 +684,12 @@ defmodule Graphism do
                          )
 
         @computed_fields unquote(
-          (e[:attributes] || e[:relations])
-           |> Enum.filter(&computed?(&1))
-           |> Enum.map(fn field ->
-             field[:name]
-           end))
+                           (e[:attributes] || e[:relations])
+                           |> Enum.filter(&computed?(&1))
+                           |> Enum.map(fn field ->
+                             field[:name]
+                           end)
+                         )
 
         def required_fields, do: @required_fields
         def optional_fields, do: @optional_fields
@@ -1087,7 +1091,7 @@ defmodule Graphism do
   end
 
   defp with_resolver_inlined_relations_funs(funs, e, schema, _api_module) do
-    (Enum.map([:create], fn action ->
+    (Enum.map([:create, :update], fn action ->
        case inlined_children_for_action(e, action) do
          [] ->
            nil
@@ -1100,9 +1104,11 @@ defmodule Graphism do
                def unquote(fun_name)(unquote(Macro.var(e[:name], nil)), args, graphql) do
                  with unquote_splicing(
                         Enum.map(rels, fn rel ->
+                          fun_name = String.to_atom("#{action}_inline_relation")
+
                           quote do
                             :ok <-
-                              create_inline_relation(
+                              unquote(fun_name)(
                                 unquote(Macro.var(e[:name], nil)),
                                 args,
                                 unquote(rel[:name]),
@@ -1120,7 +1126,7 @@ defmodule Graphism do
                  resolver_module = target[:resolver_module]
                  parent_rel = find_relation_by_kind_and_target!(target, :belongs_to, e[:name])
 
-                 children_rels_create =
+                 children_rels =
                    quote do
                      # for now we are assuming this is a list of children,
                      # but we will need to add support for has_one kind of relations too
@@ -1136,7 +1142,7 @@ defmodule Graphism do
                            unquote(Macro.var(e[:name], nil)).id
                          )
 
-                       case unquote(resolver_module).create(
+                       case unquote(resolver_module).unquote(action)(
                               graphql.parent,
                               child,
                               graphql.resolution
@@ -1150,8 +1156,10 @@ defmodule Graphism do
                      end)
                    end
 
+                 fun_name = String.to_atom("#{action}_inline_relation")
+
                  quote do
-                   defp create_inline_relation(
+                   defp unquote(fun_name)(
                           unquote(Macro.var(e[:name], nil)),
                           args,
                           unquote(rel[:name]),
@@ -1166,14 +1174,14 @@ defmodule Graphism do
                                  :ok
 
                                children ->
-                                 unquote(children_rels_create)
+                                 unquote(children_rels)
                              end
                            end
 
                          false ->
                            quote do
                              children = Map.fetch!(args, unquote(rel[:name]))
-                             unquote(children_rels_create)
+                             unquote(children_rels)
                            end
                        end
                      )
@@ -1264,7 +1272,8 @@ defmodule Graphism do
   defp with_custom_action_entity_fetch(e, opts, _schema) do
     case has_id_arg?(opts) do
       true ->
-        [ quote do
+        [
+          quote do
             {:ok, unquote(var(e))} <-
               unquote(e[:api_module]).get_by_id(unquote(var(:args)).id)
           end,
@@ -1275,6 +1284,7 @@ defmodule Graphism do
             args <- Map.drop(args, [:id])
           end
         ]
+
       false ->
         nil
     end
@@ -1406,10 +1416,12 @@ defmodule Graphism do
     case has_id_arg?(opts) do
       false ->
         quote do
-          args <- Map.put_new_lazy(args, :id, fn ->
-            Ecto.UUID.generate()
-          end)
+          args <-
+            Map.put_new_lazy(args, :id, fn ->
+              Ecto.UUID.generate()
+            end)
         end
+
       true ->
         nil
     end
@@ -1434,28 +1446,33 @@ defmodule Graphism do
     end
   end
 
+  defp resolver_fun_args_for_action(e, action) do
+    inlined_children = inlined_children_for_action(e, action)
+
+    case inlined_children do
+      [] ->
+        {quote do
+           _parent
+         end,
+         quote do
+           %{context: context}
+         end}
+
+      _ ->
+        {quote do
+           parent
+         end,
+         quote do
+           %{context: context} = resolution
+         end}
+    end
+  end
+
   defp with_resolver_create_fun(funs, e, schema, api_module, opts) do
     with_entity_funs(funs, e, :create, fn ->
       inlined_children = inlined_children_for_action(e, :create)
 
-      {parent_var, resolution_var} =
-        case inlined_children do
-          [] ->
-            {quote do
-               _parent
-             end,
-             quote do
-               %{context: context}
-             end}
-
-          _ ->
-            {quote do
-               parent
-             end,
-             quote do
-               %{context: context} = resolution
-             end}
-        end
+      {parent_var, resolution_var} = resolver_fun_args_for_action(e, :create)
 
       quote do
         def create(unquote(parent_var), unquote(var(:args)), unquote(resolution_var)) do
@@ -1479,8 +1496,6 @@ defmodule Graphism do
                   end
 
                 children ->
-                  nil
-
                   quote do
                     {children_args, args} =
                       Map.split(
@@ -1514,27 +1529,70 @@ defmodule Graphism do
     end)
   end
 
-  defp with_resolver_update_fun(funs, e, schema, api_module) do
+  defp with_resolver_update_fun(funs, e, schema, api_module, opts) do
     with_entity_funs(funs, e, :update, fn ->
-      quote do
-        def update(_parent, unquote(var(:args)), %{context: context}) do
-          with unquote_splicing(
-                 [
-                   with_entity_fetch(e),
-                   with_parent_entities_fetch(e, schema, mode: :update),
-                   with_args_without_parents(e),
-                   with_args_without_id(),
-                   with_should(e, :update)
-                 ]
-                 |> flat()
-                 |> without_nils()
-               ) do
-            unquote(api_module).update(
-              unquote_splicing((e |> parent_relations() |> names() |> vars()) ++ [var(e), var(:args)])
-            )
+      inlined_children = inlined_children_for_action(e, :update)
+
+      {parent_var, resolution_var} = resolver_fun_args_for_action(e, :update)
+
+      ast =
+        quote do
+          def update(unquote(parent_var), unquote(var(:args)), unquote(resolution_var)) do
+            with unquote_splicing(
+                   [
+                     with_entity_fetch(e),
+                     with_parent_entities_fetch(e, schema, mode: :update),
+                     with_args_without_parents(e),
+                     with_args_without_id(),
+                     with_should(e, :update)
+                   ]
+                   |> flat()
+                   |> without_nils()
+                 ) do
+              unquote(
+                case inlined_children do
+                  [] ->
+                    quote do
+                      unquote(api_module).update(
+                        unquote_splicing((e |> parent_relations() |> names() |> vars()) ++ [var(e), var(:args)])
+                      )
+                    end
+
+                  children ->
+                    quote do
+                      {children_args, args} =
+                        Map.split(
+                          args,
+                          unquote(names(children))
+                        )
+
+                      unquote(opts[:repo]).transaction(fn ->
+                        with {:ok, unquote(var(e))} <-
+                               unquote(api_module).update(
+                                 unquote_splicing(
+                                   (e |> parent_relations() |> names() |> vars()) ++ [var(e), var(:args)]
+                                 )
+                               ),
+                             :ok <-
+                               update_inline_relations(
+                                 unquote(var(e)),
+                                 children_args,
+                                 %{parent: parent, resolution: resolution}
+                               ) do
+                          unquote(var(e))
+                        else
+                          {:error, changeset} ->
+                            unquote(opts[:repo]).rollback(changeset)
+                        end
+                      end)
+                    end
+                end
+              )
+            end
           end
         end
-      end
+
+      ast
     end)
   end
 
@@ -1593,7 +1651,7 @@ defmodule Graphism do
       |> with_resolver_list_funs(e, schema, api_module)
       |> with_resolver_read_funs(e, schema, api_module)
       |> with_resolver_create_fun(e, schema, api_module, opts)
-      |> with_resolver_update_fun(e, schema, api_module)
+      |> with_resolver_update_fun(e, schema, api_module, opts)
       |> with_resolver_delete_fun(e, schema, api_module)
       |> with_resolver_custom_funs(e, schema, api_module)
       |> List.flatten()
@@ -1848,32 +1906,39 @@ defmodule Graphism do
             e[:attributes]
             |> Enum.filter(fn attr ->
               Keyword.has_key?(attr[:opts], :default) &&
-              computed?(attr)
+                computed?(attr)
             end)
             |> Enum.map(fn attr ->
               quote do
-                attrs = Map.put_new_lazy(attrs, unquote(attr[:name]), fn ->
-                  unquote(attr[:opts][:default])
-                end)
+                attrs =
+                  Map.put_new_lazy(attrs, unquote(attr[:name]), fn ->
+                    unquote(attr[:opts][:default])
+                  end)
               end
             end)
 
-          repo_insert = quote do
-            result =
-              with {:ok, e} <-
-                     %unquote(schema_module){}
-                     |> unquote(schema_module).changeset(attrs)
-                     |> unquote(repo_module).insert() do
-                get_by_id(e.id)
-              end
-          end
+          repo_insert =
+            quote do
+              result =
+                with {:ok, e} <-
+                       %unquote(schema_module){}
+                       |> unquote(schema_module).changeset(attrs)
+                       |> unquote(repo_module).insert() do
+                  get_by_id(e.id)
+                end
+            end
 
-          ast = quote do
-            unquote_splicing([
-              default_fields,
-              repo_insert
-            ] |> flat() |> without_nils())
-          end
+          ast =
+            quote do
+              (unquote_splicing(
+                 [
+                   default_fields,
+                   repo_insert
+                 ]
+                 |> flat()
+                 |> without_nils()
+               ))
+            end
 
           ast
       end
@@ -2073,7 +2138,7 @@ defmodule Graphism do
       kind =
         case attr[:opts][:allow] do
           nil ->
-            case optional?(attr) do
+            case optional?(attr) || opts[:mode] == :update do
               true ->
                 quote do
                   unquote(kind)
@@ -2129,6 +2194,14 @@ defmodule Graphism do
         end
 
       case opts[:mode] do
+        :update_input ->
+          quote do
+            field(
+              unquote(rel[:name]),
+              :id
+            )
+          end
+
         :input ->
           case optional?(rel) do
             false ->
@@ -2360,6 +2433,29 @@ defmodule Graphism do
     end)
   end
 
+  defp graphql_update_input_types(e, schema) do
+    e[:relations]
+    |> Enum.filter(fn rel -> :has_many == rel[:kind] && inline_relation?(rel, :update) end)
+    |> Enum.map(fn rel ->
+      target = find_entity!(schema, rel[:target])
+      input_type = String.to_atom("#{target[:name]}_update_input")
+
+      quote do
+        input_object unquote(input_type) do
+          (unquote_splicing(
+             graphql_attribute_fields(target, schema, mode: :update) ++
+               graphql_relation_fields(target, schema,
+                 mode: :update_input,
+                 skip: [
+                   e[:name]
+                 ]
+               )
+           ))
+        end
+      end
+    end)
+  end
+
   defp graphql_mutations(e, schema) do
     case mutations?(e) do
       false ->
@@ -2505,6 +2601,17 @@ defmodule Graphism do
              |> Enum.map(fn rel ->
                quote do
                  arg(unquote(rel[:name]), :id)
+               end
+             end)) ++
+            (e[:relations]
+             |> Enum.filter(fn rel ->
+               :has_many == rel[:kind] && inline_relation?(rel, :update)
+             end)
+             |> Enum.map(fn rel ->
+               input_type = String.to_atom("#{rel[:target]}_update_input")
+
+               quote do
+                 arg(unquote(rel[:name]), list_of(non_null(unquote(input_type))))
                end
              end))
         )
