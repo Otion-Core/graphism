@@ -1090,6 +1090,22 @@ defmodule Graphism do
     ast
   end
 
+  defp inline_relation_resolver_call(resolver_module, action) do
+    quote do
+      case unquote(resolver_module).unquote(action)(
+             graphql.parent,
+             child,
+             graphql.resolution
+           ) do
+        {:ok, _} ->
+          {:cont, :ok}
+
+        {:error, e} ->
+          {:halt, {:error, e}}
+      end
+    end
+  end
+
   defp with_resolver_inlined_relations_funs(funs, e, schema, _api_module) do
     (Enum.map([:create, :update], fn action ->
        case inlined_children_for_action(e, action) do
@@ -1142,17 +1158,26 @@ defmodule Graphism do
                            unquote(Macro.var(e[:name], nil)).id
                          )
 
-                       case unquote(resolver_module).unquote(action)(
-                              graphql.parent,
-                              child,
-                              graphql.resolution
-                            ) do
-                         {:ok, _} ->
-                           {:cont, :ok}
+                       # if the child input contains an id, 
+                       # and we are updating, then we assume we want to update, 
+                       # if not we assume we want to create.
+                       unquote(
+                         case action do
+                           :update ->
+                             quote do
+                               case Map.get(child, :id, nil) do
+                                 nil ->
+                                   unquote(inline_relation_resolver_call(resolver_module, :create))
 
-                         {:error, e} ->
-                           {:halt, {:error, e}}
-                       end
+                                 _ ->
+                                   unquote(inline_relation_resolver_call(resolver_module, action))
+                               end
+                             end
+
+                           _ ->
+                             inline_relation_resolver_call(resolver_module, action)
+                         end
+                       )
                      end)
                    end
 
@@ -2154,7 +2179,7 @@ defmodule Graphism do
       kind =
         case attr[:opts][:allow] do
           nil ->
-            case optional?(attr) || (opts[:mode] == :update && attr[:name] != :id) do
+            case optional?(attr) || opts[:mode] == :update do
               true ->
                 quote do
                   unquote(kind)
