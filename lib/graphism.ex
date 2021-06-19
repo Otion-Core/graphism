@@ -2008,18 +2008,36 @@ defmodule Graphism do
                 attrs
                 |> Map.put(
                   unquote(String.to_atom("#{rel[:name]}_id")),
-                  unquote(Macro.var(rel[:name], nil)).id
+                  unquote(
+                    case optional?(rel) do
+                      true ->
+                        quote do
+                          case unquote(var(rel)) do
+                            nil ->
+                              nil
+
+                            _ ->
+                              unquote(var(rel)).id
+                          end
+                        end
+
+                      false ->
+                        quote do
+                          unquote(var(rel)).id
+                        end
+                    end
+                  )
                 )
             end
           end)
         )
 
         result =
-          with {:ok, unquote(Macro.var(e[:name], nil))} <-
-                 unquote(Macro.var(e[:name], nil))
+          with {:ok, unquote(var(e))} <-
+                 unquote(var(e))
                  |> unquote(schema_module).changeset(attrs)
                  |> unquote(repo_module).update() do
-            get_by_id(unquote(Macro.var(e[:name], nil)).id)
+            get_by_id(unquote(var(e)).id)
           end
       end
 
@@ -2029,11 +2047,9 @@ defmodule Graphism do
               unquote_splicing(
                 e[:relations]
                 |> Enum.filter(fn rel -> rel[:kind] == :belongs_to end)
-                |> Enum.map(fn rel ->
-                  Macro.var(rel[:name], nil)
-                end)
+                |> Enum.map(&var(&1))
               ),
-              unquote(Macro.var(e[:name], nil)),
+              unquote(var(e)),
               attrs
             ) do
           unquote(before_hook(e, :update))
@@ -2549,8 +2565,21 @@ defmodule Graphism do
              |> Enum.filter(fn rel -> :belongs_to == rel[:kind] || :has_one == rel[:kind] end)
              |> Enum.reject(&computed?(&1))
              |> Enum.map(fn rel ->
+               kind =
+                 case optional?(rel) do
+                   false ->
+                     quote do
+                       non_null(:id)
+                     end
+
+                   true ->
+                     quote do
+                       :id
+                     end
+                 end
+
                quote do
-                 arg(unquote(rel[:name]), non_null(:id))
+                 arg(unquote(rel[:name]), unquote(kind))
                end
              end)) ++
             (e[:relations]
