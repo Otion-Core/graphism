@@ -727,19 +727,31 @@ defmodule Graphism do
           changes = e |> cast(%{}, [])
 
           unquote_splicing(
-            e[:relations]
-            |> Enum.filter(fn rel -> rel[:kind] == :has_one || rel[:kind] == :has_many end)
+            # find all relations in the schema that 
+            # point to this entity
+            schema
+            |> Enum.flat_map(fn entity ->
+              entity[:relations]
+              |> Enum.filter(fn rel ->
+                rel[:target] == e[:name] &&
+                  (rel[:kind] == :belongs_to ||
+                     rel[:kind] == :has_one)
+              end)
+              |> Enum.map(fn rel ->
+                Keyword.put(rel, :from, entity)
+              end)
+            end)
             |> Enum.map(fn rel ->
-              target = find_entity!(schema, rel[:target])
-              target_table = target[:table]
-              constraint = "#{target_table}_#{e[:name]}_id_fkey"
+              from_entity = rel[:from][:name]
+              from_table = rel[:from][:table]
+              name = "#{from_table}_#{e[:name]}_id_fkey"
               message = "not empty"
 
               quote do
                 changes =
                   changes
-                  |> foreign_key_constraint(unquote(rel[:name]),
-                    name: unquote(constraint),
+                  |> foreign_key_constraint(unquote(from_entity),
+                    name: unquote(name),
                     message: unquote(message)
                   )
               end
@@ -2214,7 +2226,14 @@ defmodule Graphism do
   defp graphql_relation_fields(e, _schema, opts) do
     e[:relations]
     |> Enum.reject(fn rel ->
-      Enum.member?(opts[:skip] || [], rel[:target])
+      # inside input types, we don't want to include children
+      # relations. Also we might want to skip certain entities depdencing 
+      # on the context
+      Enum.member?(
+        opts[:skip] || [],
+        rel[:target]
+      ) ||
+        (rel[:kind] == :has_many && (opts[:mode] == :input || opts[:mode] == :update_input))
     end)
     |> Enum.map(fn rel ->
       optional =
