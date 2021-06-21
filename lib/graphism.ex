@@ -1860,6 +1860,20 @@ defmodule Graphism do
     ] ++ funs
   end
 
+  defp hook_call(e, mod, action) do
+    case action do
+      :update ->
+        quote do
+          {:ok, attrs} = unquote(mod).execute(unquote(var(e)), attrs)
+        end
+
+      _ ->
+        quote do
+          {:ok, attrs} = unquote(mod).execute(attrs)
+        end
+    end
+  end
+
   defp before_hook(e, action) do
     opts =
       e[:actions][action] ||
@@ -1873,17 +1887,13 @@ defmodule Graphism do
         quote do
           (unquote_splicing(
              Enum.map(mods, fn mod ->
-               quote do
-                 {:ok, attrs} = unquote(mod).execute(attrs)
-               end
+               hook_call(e, mod, action)
              end)
            ))
         end
 
       mod ->
-        quote do
-          {:ok, attrs} = unquote(mod).execute(attrs)
-        end
+        hook_call(e, mod, action)
     end
   end
 
