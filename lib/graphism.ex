@@ -1203,23 +1203,14 @@ defmodule Graphism do
                           graphql
                         ) do
                      unquote(
-                       case optional?(rel) do
-                         true ->
-                           quote do
-                             case Map.get(args, unquote(rel[:name]), nil) do
-                               nil ->
-                                 :ok
+                       quote do
+                         case Map.get(args, unquote(rel[:name]), nil) do
+                           nil ->
+                             :ok
 
-                               children ->
-                                 unquote(children_rels)
-                             end
-                           end
-
-                         false ->
-                           quote do
-                             children = Map.fetch!(args, unquote(rel[:name]))
+                           children ->
                              unquote(children_rels)
-                           end
+                         end
                        end
                      )
                    end
