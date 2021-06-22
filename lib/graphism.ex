@@ -1736,7 +1736,9 @@ defmodule Graphism do
     [
       quote do
         def list(context) do
-          query = unquote(schema_module)
+          query =
+            from unquote(var(e)) in unquote(schema_module),
+              order_by: [asc: :inserted_at]
 
           unquote(
             with_entity_scope(e, :list, fn ->
@@ -1753,8 +1755,9 @@ defmodule Graphism do
           quote do
             def unquote(String.to_atom("list_by_#{rel[:name]}"))(id, context) do
               query =
-                from(unquote(Macro.var(rel[:name], nil)) in unquote(schema_module),
-                  where: unquote(Macro.var(rel[:name], nil)).unquote(String.to_atom("#{rel[:name]}_id")) == ^id
+                from(unquote(var(rel)) in unquote(schema_module),
+                  where: unquote(var(rel)).unquote(String.to_atom("#{rel[:name]}_id")) == ^id,
+                  order_by: [asc: unquote(var(rel)).inserted_at]
                 )
 
               unquote(
