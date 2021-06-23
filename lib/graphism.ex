@@ -48,6 +48,7 @@ defmodule Graphism do
 
       use Absinthe.Schema
       import Absinthe.Resolution.Helpers, only: [dataloader: 1]
+      import_types(Absinthe.Type.Custom)
 
       @sources [unquote(__CALLER__.module).Dataloader.Repo]
       @fields_auth unquote(__CALLER__.module).FieldsAuth
@@ -2297,11 +2298,23 @@ defmodule Graphism do
     end)
   end
 
+  @timestamp_fields [:inserted_at, :updated_at]
+
+  defp graphql_timestamp_fields() do
+    @timestamp_fields
+    |> Enum.map(fn field ->
+      quote do
+        field(unquote(field), non_null(:naive_datetime))
+      end
+    end)
+  end
+
   defp graphql_object(e, schema, opts) do
     quote do
       object unquote(e[:name]) do
         (unquote_splicing(
            graphql_attribute_fields(e, schema, opts) ++
+             graphql_timestamp_fields() ++
              graphql_relation_fields(e, schema, opts)
          ))
       end
