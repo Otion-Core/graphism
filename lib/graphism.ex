@@ -346,9 +346,6 @@ defmodule Graphism do
   defmacro has_many(_name, _opts \\ []) do
   end
 
-  defmacro has_one(_name, _opts \\ []) do
-  end
-
   defmacro belongs_to(_name, _opts \\ []) do
   end
 
@@ -646,11 +643,6 @@ defmodule Graphism do
                   quote do
                     Ecto.Schema.has_many(unquote(rel[:name]), unquote(schema_module))
                   end
-
-                :has_one ->
-                  quote do
-                    Ecto.Schema.has_one(unquote(rel[:name]), unquote(schema_module))
-                  end
               end
             end)
           )
@@ -740,8 +732,7 @@ defmodule Graphism do
               entity[:relations]
               |> Enum.filter(fn rel ->
                 rel[:target] == e[:name] &&
-                  (rel[:kind] == :belongs_to ||
-                     rel[:kind] == :has_one)
+                  rel[:kind] == :belongs_to
               end)
               |> Enum.map(fn rel ->
                 Keyword.put(rel, :from, entity)
@@ -1162,10 +1153,6 @@ defmodule Graphism do
 
                  children_rels =
                    quote do
-                     # for now we are assuming this is a list of children,
-                     # but we will need to add support for has_one kind of relations too
-                     # the most generic case being a list, we will treat both kinds of
-                     # relation with the same logic
                      Enum.reduce_while(children, :ok, fn child, _ ->
                        # populate the parent relation
                        # and delete to the child entity resolver
@@ -2628,7 +2615,7 @@ defmodule Graphism do
              end
            end)) ++
             (e[:relations]
-             |> Enum.filter(fn rel -> :belongs_to == rel[:kind] || :has_one == rel[:kind] end)
+             |> Enum.filter(fn rel -> :belongs_to == rel[:kind] end)
              |> Enum.reject(&computed?(&1))
              |> Enum.map(fn rel ->
                kind =
@@ -2691,7 +2678,7 @@ defmodule Graphism do
                end
              end)) ++
             (e[:relations]
-             |> Enum.filter(fn rel -> :belongs_to == rel[:kind] || :has_one == rel[:kind] end)
+             |> Enum.filter(fn rel -> :belongs_to == rel[:kind] end)
              |> Enum.reject(&computed?(&1))
              |> Enum.map(fn rel ->
                quote do
@@ -2804,12 +2791,6 @@ defmodule Graphism do
 
       {:has_many, _, [name, opts]} ->
         [name: name, kind: :has_many, opts: opts, plural: name]
-
-      {:has_one, _, [name]} ->
-        [name: name, kind: :has_one, opts: []]
-
-      {:has_one, _, [name, opts]} ->
-        [name: name, kind: :has_one, opts: opts]
 
       {:belongs_to, _, [name]} ->
         [name: name, kind: :belongs_to, opts: []]

@@ -72,7 +72,7 @@ defmodule Graphism.Migrations do
     # to be added to the table migrations
     m =
       e[:relations]
-      |> Enum.filter(fn rel -> :has_one == rel[:kind] || :belongs_to == rel[:kind] end)
+      |> Enum.filter(fn rel -> :belongs_to == rel[:kind] end)
       |> Enum.reduce(m, fn rel, m ->
         name = column_name_from_relation(rel)
         opts = column_opts_from_relation(rel, index)
