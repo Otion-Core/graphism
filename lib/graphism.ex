@@ -2220,7 +2220,7 @@ defmodule Graphism do
         opts[:skip] || [],
         rel[:target]
       ) ||
-        (rel[:kind] == :has_many && (opts[:mode] == :input || opts[:mode] == :update_input))
+        ((computed?(rel) || rel[:kind] == :has_many) && (opts[:mode] == :input || opts[:mode] == :update_input))
     end)
     |> Enum.map(fn rel ->
       optional =
