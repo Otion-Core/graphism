@@ -628,25 +628,29 @@ defmodule Graphism do
 
           unquote_splicing(
             e[:relations]
-            |> Enum.filter(fn rel -> rel[:kind] == :belongs_to end)
-            |> Enum.map(fn rel ->
-              target = find_entity!(schema, rel[:target])
-
-              quote do
-                Ecto.Schema.belongs_to(unquote(rel[:name]), unquote(target[:schema_module]), type: :binary_id)
-              end
-            end)
-          )
-
-          unquote_splicing(
-            e[:relations]
-            |> Enum.filter(fn rel -> rel[:kind] == :has_many end)
             |> Enum.map(fn rel ->
               target = find_entity!(schema, rel[:target])
               schema_module = target[:schema_module]
 
-              quote do
-                Ecto.Schema.has_many(unquote(rel[:name]), unquote(schema_module))
+              case rel[:kind] do
+                :belongs_to ->
+                  quote do
+                    Ecto.Schema.belongs_to(
+                      unquote(rel[:name]),
+                      unquote(schema_module),
+                      type: :binary_id
+                    )
+                  end
+
+                :has_many ->
+                  quote do
+                    Ecto.Schema.has_many(unquote(rel[:name]), unquote(schema_module))
+                  end
+
+                :has_one ->
+                  quote do
+                    Ecto.Schema.has_one(unquote(rel[:name]), unquote(schema_module))
+                  end
               end
             end)
           )
@@ -676,13 +680,15 @@ defmodule Graphism do
                             end)) ++
                              (e[:relations]
                               |> Enum.filter(fn rel ->
-                                rel[:kind] == :has_one || rel[:kind] == :belongs_to
+                                rel[:kind] == :belongs_to
                               end)
                               |> Enum.filter(&optional?(&1))
                               |> Enum.map(fn rel ->
                                 String.to_atom("#{rel[:name]}_id")
                               end))
                          )
+
+        @all_fields @required_fields ++ @optional_fields
 
         @computed_fields unquote(
                            (e[:attributes] || e[:relations])
@@ -699,8 +705,7 @@ defmodule Graphism do
         def changeset(e, attrs) do
           changes =
             e
-            |> cast(attrs, @required_fields)
-            |> cast(attrs, @optional_fields)
+            |> cast(attrs, @all_fields)
             |> validate_required(@required_fields)
             |> unique_constraint(:id, name: unquote("#{e[:table]}_pkey"))
 
