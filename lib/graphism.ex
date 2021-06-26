@@ -18,6 +18,11 @@ defmodule Graphism do
       raise "Please specify a repo module when using Graphism"
     end
 
+    Module.register_attribute(__CALLER__.module, :data,
+      accumulate: true,
+      persist: true
+    )
+
     Module.register_attribute(__CALLER__.module, :schema,
       accumulate: true,
       persist: true
@@ -308,6 +313,7 @@ defmodule Graphism do
 
   defmacro entity(name, opts \\ [], do: block) do
     caller_module = __CALLER__.module
+    data = Module.get_attribute(caller_module, :data)
 
     attrs = attributes_from(block)
     rels = relations_from(block)
@@ -330,7 +336,7 @@ defmodule Graphism do
       |> with_schema_module(caller_module)
       |> with_api_module(caller_module)
       |> with_resolver_module(caller_module)
-      |> with_enums()
+      |> with_enums(data)
       |> maybe_with_scope()
 
     Module.put_attribute(__CALLER__.module, :schema, entity)
@@ -350,6 +356,10 @@ defmodule Graphism do
   end
 
   defmacro action(_name, _opts) do
+  end
+
+  defmacro data(name, value) do
+    Module.put_attribute(__CALLER__.module, :data, {name, value})
   end
 
   defp without_nils(enum) do
@@ -444,9 +454,24 @@ defmodule Graphism do
 
   # Inspect attributes and extract enum types from those attributes
   # that have a defined set of possible values
-  defp with_enums(entity) do
-    enums =
+  defp with_enums(entity, data) do
+    attrs =
       entity[:attributes]
+      |> Enum.map(fn attr ->
+        enum = attr[:opts][:one_of]
+
+        case enum do
+          nil ->
+            attr
+
+          _ ->
+            enum = resolve_enum_values(enum, data)
+            put_in(attr, [:opts, :one_of], enum)
+        end
+      end)
+
+    enums =
+      attrs
       |> Enum.filter(fn attr -> attr[:opts][:one_of] end)
       |> Enum.reduce([], fn attr, enums ->
         enum_name = enum_name(entity, attr)
@@ -454,7 +479,21 @@ defmodule Graphism do
         [[name: enum_name, values: values] | enums]
       end)
 
-    Keyword.put(entity, :enums, enums)
+    entity
+    |> Keyword.put(:attributes, attrs)
+    |> Keyword.put(:enums, enums)
+  end
+
+  defp resolve_enum_values(enum, _) when is_list(enum), do: enum
+
+  defp resolve_enum_values(enum, data) when is_atom(enum) do
+    values = data[enum]
+
+    unless values do
+      raise "enumeration #{enum} is not defined as a value"
+    end
+
+    values
   end
 
   defp enum_name(e, attr) do
