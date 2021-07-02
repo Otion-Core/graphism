@@ -87,6 +87,14 @@ defmodule Graphism do
       __CALLER__.module
       |> Module.get_attribute(:repo)
 
+    data =
+      __CALLER__.module
+      |> Module.get_attribute(:data)
+
+    enums =
+      data
+      |> Enum.filter(fn {_, values} -> is_list(values) end)
+
     unless length(schema) > 0 do
       raise """
         Your Graphism schema is empty. Please define at least
@@ -148,6 +156,13 @@ defmodule Graphism do
         end
       end
 
+    enums_fun =
+      quote do
+        def enums() do
+          unquote(enums)
+        end
+      end
+
     schema_fun =
       quote do
         def schema do
@@ -191,9 +206,9 @@ defmodule Graphism do
         resolver_module(e, schema, repo: repo, caller: __CALLER__)
       end)
 
-    enums =
-      Enum.map(schema, fn e ->
-        graphql_enum(e, schema)
+    enum_types =
+      Enum.map(enums, fn {enum, value} ->
+        graphql_enum(enum, value)
       end)
 
     objects = [
@@ -295,12 +310,13 @@ defmodule Graphism do
 
     List.flatten([
       schema_settings,
+      enums_fun,
       schema_fun,
       schema_empty_modules,
       schema_modules,
       api_modules,
       resolver_modules,
-      enums,
+      enum_types,
       input_types,
       objects,
       self_resolver,
@@ -336,7 +352,7 @@ defmodule Graphism do
       |> with_schema_module(caller_module)
       |> with_api_module(caller_module)
       |> with_resolver_module(caller_module)
-      |> with_enums(data)
+      |> with_enums!(data)
       |> maybe_with_scope()
 
     Module.put_attribute(__CALLER__.module, :schema, entity)
@@ -452,52 +468,24 @@ defmodule Graphism do
     entity
   end
 
-  # Inspect attributes and extract enum types from those attributes
-  # that have a defined set of possible values
-  defp with_enums(entity, data) do
-    attrs =
-      entity[:attributes]
-      |> Enum.map(fn attr ->
-        enum = attr[:opts][:one_of]
-
-        case enum do
-          nil ->
-            attr
-
-          _ ->
-            enum = resolve_enum_values(enum, data)
-            put_in(attr, [:opts, :one_of], enum)
-        end
-      end)
-
-    enums =
-      attrs
-      |> Enum.filter(fn attr -> attr[:opts][:one_of] end)
-      |> Enum.reduce([], fn attr, enums ->
-        enum_name = enum_name(entity, attr)
-        values = attr[:opts][:one_of]
-        [[name: enum_name, values: values] | enums]
-      end)
+  defp with_enums!(entity, data) do
+    entity[:attributes]
+    |> Enum.filter(fn attr ->
+      attr[:opts][:one_of]
+    end)
+    |> Enum.each(fn attr ->
+      enum!(attr[:opts][:one_of], data)
+    end)
 
     entity
-    |> Keyword.put(:attributes, attrs)
-    |> Keyword.put(:enums, enums)
   end
 
-  defp resolve_enum_values(enum, _) when is_list(enum), do: enum
-
-  defp resolve_enum_values(enum, data) when is_atom(enum) do
+  defp enum!(enum, data) when is_atom(enum) do
     values = data[enum]
 
     unless values do
       raise "enumeration #{enum} is not defined as a value"
     end
-
-    values
-  end
-
-  defp enum_name(e, attr) do
-    String.to_atom("#{e[:name]}_#{attr[:name]}s")
   end
 
   defp with_entity_action(e, action, next) do
@@ -2193,16 +2181,8 @@ defmodule Graphism do
     end
   end
 
-  defp attr_graphql_type(e, attr) do
-    case attr[:opts][:one_of] do
-      nil ->
-        # it is not an enum, so we use its defined type
-        attr[:kind]
-
-      [_ | _] ->
-        # use the name of the enum as the type
-        enum_name(e, attr)
-    end
+  defp attr_graphql_type(attr) do
+    attr[:opts][:one_of] || attr[:kind]
   end
 
   defp unit_graphql_object() do
@@ -2220,9 +2200,7 @@ defmodule Graphism do
     end)
     |> Enum.reject(&private?(&1))
     |> Enum.map(fn attr ->
-      # determine the kind for this field, depending
-      # on whether it is an enum or not
-      kind = attr_graphql_type(e, attr)
+      kind = attr_graphql_type(attr)
 
       kind =
         case attr[:opts][:allow] do
@@ -2352,20 +2330,18 @@ defmodule Graphism do
     end
   end
 
-  defp graphql_enum(e, _) do
-    Enum.map(e[:enums], fn enum ->
-      quote do
-        enum unquote(enum[:name]) do
-          (unquote_splicing(
-             Enum.map(enum[:values], fn value ->
-               quote do
-                 value(unquote(value), as: unquote("#{value}"))
-               end
-             end)
-           ))
-        end
+  defp graphql_enum(enum, values) do
+    quote do
+      enum unquote(enum) do
+        (unquote_splicing(
+           Enum.map(values, fn value ->
+             quote do
+               value(unquote(value), as: unquote("#{value}"))
+             end
+           end)
+         ))
       end
-    end)
+    end
   end
 
   @readonly_actions [:read, :list]
@@ -2465,7 +2441,7 @@ defmodule Graphism do
     e[:attributes]
     |> Enum.filter(&unique?(&1))
     |> Enum.map(fn attr ->
-      kind = attr_graphql_type(e, attr)
+      kind = attr_graphql_type(attr)
       description = "Find a single #{e[:display_name]} given its unique #{attr[:name]}"
 
       {scope_args, description} =
@@ -2634,7 +2610,7 @@ defmodule Graphism do
            |> Enum.reject(fn attr -> attr[:name] == :id end)
            |> Enum.reject(&computed?(&1))
            |> Enum.map(fn attr ->
-             kind = attr_graphql_type(e, attr)
+             kind = attr_graphql_type(attr)
 
              quote do
                arg(
@@ -2707,7 +2683,7 @@ defmodule Graphism do
                attr[:name] == :id || computed?(attr)
              end)
              |> Enum.map(fn attr ->
-               kind = attr_graphql_type(e, attr)
+               kind = attr_graphql_type(attr)
 
                quote do
                  arg(
@@ -2785,7 +2761,7 @@ defmodule Graphism do
                      :id
 
                    attr ->
-                     attr_graphql_type(e, attr)
+                     attr_graphql_type(attr)
                  end
 
                quote do
