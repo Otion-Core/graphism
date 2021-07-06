@@ -1886,125 +1886,130 @@ defmodule Graphism do
     ] ++ funs
   end
 
-  defp hook_call(e, mod, action) do
-    case action do
-      :update ->
-        quote do
-          {:ok, attrs} = unquote(mod).execute(unquote(var(e)), attrs)
-        end
+  ## defp hook_call(e, mod, action) do
+  ##  case action do
+  ##    :update ->
+  ##      quote do
+  ##        {:ok, attrs} = unquote(mod).execute(unquote(var(e)), attrs)
+  ##      end
 
-      _ ->
-        quote do
-          {:ok, attrs} = unquote(mod).execute(attrs)
-        end
+  ##    _ ->
+  ##      quote do
+  ##        {:ok, attrs} = unquote(mod).execute(attrs)
+  ##      end
+  ##  end
+  ## end
+
+  defp hook_call(e, mod, :before, :update) do
+    quote do
+      {:ok, attrs} <- unquote(mod).execute(unquote(var(e)), attrs)
     end
   end
 
-  defp before_hook(e, action) do
+  defp hook_call(_, mod, :before, _) do
+    quote do
+      {:ok, attrs} <- unquote(mod).execute(attrs)
+    end
+  end
+
+  defp hook_call(e, mod, :after, _) do
+    quote do
+      {:ok, _} <- unquote(mod).execute(unquote(var(e)))
+    end
+  end
+
+  defp hooks(nil), do: []
+  defp hooks(mod) when is_atom(mod), do: [mod]
+  defp hooks(mods) when is_list(mods), do: mods
+
+  defp hooks(e, phase, action) do
     opts =
       e[:actions][action] ||
         e[:custom_actions][action]
 
-    case opts[:before] do
-      nil ->
-        nil
-
-      mods when is_list(mods) ->
-        quote do
-          (unquote_splicing(
-             Enum.map(mods, fn mod ->
-               hook_call(e, mod, action)
-             end)
-           ))
-        end
-
-      mod ->
-        hook_call(e, mod, action)
-    end
+    opts[phase]
+    |> hooks()
+    |> Enum.map(&hook_call(e, &1, phase, action))
   end
 
-  defp after_hook(e, action) do
-    opts =
-      e[:actions][action] ||
-        e[:custom_actions][action]
-
-    case opts[:after] do
-      nil ->
-        nil
-
-      mods when is_list(mods) ->
-        quote do
-          with {:ok, res} <- result do
-            (unquote_splicing(
-               Enum.map(mods, fn mod ->
-                 quote do
-                   unquote(mod).execute(res)
-                 end
-               end)
-             ))
-          end
-        end
-
-      mod when is_atom(mod) ->
-        quote do
-          with {:ok, res} <- result do
-            unquote(mod).execute(res)
-          end
-        end
+  def debug_ast(ast, condition \\ true) do
+    if condition do
+      ast
+      |> Macro.to_string()
+      |> Code.format_string!()
+      |> IO.puts()
     end
+
+    ast
+  end
+
+  defp attrs_with_parent_relations(e) do
+    parent_relations(e)
+    |> Enum.map(fn rel ->
+      quote do
+        attrs <-
+          Map.put(
+            attrs,
+            unquote(String.to_atom("#{rel[:name]}_id")),
+            unquote(
+              case optional?(rel) do
+                true ->
+                  quote do
+                    case unquote(var(rel)) do
+                      nil ->
+                        nil
+
+                      _ ->
+                        unquote(var(rel)).id
+                    end
+                  end
+
+                false ->
+                  quote do
+                    unquote(var(rel)).id
+                  end
+              end
+            )
+          )
+      end
+    end)
   end
 
   defp with_api_create_fun(funs, e, schema_module, repo_module, _schema) do
-    fun_body =
-      case virtual?(e) do
-        true ->
-          quote do
-            result = unquote(e[:actions][:create][:using]).execute(attrs)
-          end
-
-        false ->
-          default_fields =
-            e[:attributes]
-            |> Enum.filter(fn attr ->
-              Keyword.has_key?(attr[:opts], :default) &&
-                computed?(attr)
+    default_attrs =
+      e[:attributes]
+      |> Enum.filter(fn attr ->
+        Keyword.has_key?(attr[:opts], :default) &&
+          computed?(attr)
+      end)
+      |> Enum.map(fn attr ->
+        quote do
+          attrs <-
+            Map.put_new_lazy(attrs, unquote(attr[:name]), fn ->
+              unquote(attr[:opts][:default])
             end)
-            |> Enum.map(fn attr ->
-              quote do
-                attrs =
-                  Map.put_new_lazy(attrs, unquote(attr[:name]), fn ->
-                    unquote(attr[:opts][:default])
-                  end)
-              end
-            end)
+        end
+      end)
 
-          repo_insert =
-            quote do
-              result =
-                with {:ok, e} <-
-                       %unquote(schema_module){}
-                       |> unquote(schema_module).changeset(attrs)
-                       |> unquote(repo_module).insert() do
-                  get_by_id(e.id)
-                end
-            end
+    parent_relations = attrs_with_parent_relations(e)
 
-          ast =
-            quote do
-              (unquote_splicing(
-                 [
-                   default_fields,
-                   repo_insert
-                 ]
-                 |> flat()
-                 |> without_nils()
-               ))
-            end
-
-          ast
+    insert =
+      quote do
+        {:ok, unquote(var(e))} <-
+          %unquote(schema_module){}
+          |> unquote(schema_module).changeset(attrs)
+          |> unquote(repo_module).insert()
       end
 
-    [
+    refetch =
+      quote do
+        {:ok, unquote(var(e))} <- get_by_id(unquote(var(e)).id)
+      end
+
+    before_hooks = hooks(e, :before, :create)
+    after_hooks = hooks(e, :after, :create)
+
+    fun =
       quote do
         def create(
               unquote_splicing(
@@ -2014,113 +2019,83 @@ defmodule Graphism do
               ),
               attrs
             ) do
-          unquote_splicing(
-            e
-            |> parent_relations()
-            |> Enum.map(fn rel ->
-              quote do
-                attrs =
-                  attrs
-                  |> Map.put(
-                    unquote(String.to_atom("#{rel[:name]}_id")),
-                    unquote(
-                      case optional?(rel) do
-                        true ->
-                          quote do
-                            case unquote(var(rel)) do
-                              nil ->
-                                nil
-
-                              _ ->
-                                unquote(var(rel)).id
-                            end
-                          end
-
-                        false ->
-                          quote do
-                            unquote(var(rel)).id
-                          end
-                      end
-                    )
-                  )
-              end
-            end)
-          )
-
-          unquote(before_hook(e, :create))
-          unquote(fun_body)
-          unquote(after_hook(e, :create))
-          result
+          unquote(repo_module).transaction(fn ->
+            with unquote_splicing(
+                   [
+                     parent_relations,
+                     before_hooks,
+                     default_attrs,
+                     insert,
+                     refetch,
+                     after_hooks
+                   ]
+                   |> flat()
+                   |> without_nils()
+                 ) do
+              unquote(var(e))
+            else
+              {:error, e} ->
+                unquote(repo_module).rollback(e)
+            end
+          end)
         end
       end
-      | funs
-    ]
+
+    [fun | funs]
   end
 
   defp with_api_update_fun(funs, e, schema_module, repo_module, _schema) do
-    fun_body =
+    parent_relations = attrs_with_parent_relations(e)
+
+    update =
       quote do
-        unquote_splicing(
-          e[:relations]
-          |> Enum.filter(fn rel -> rel[:kind] == :belongs_to end)
-          |> Enum.map(fn rel ->
-            quote do
-              attrs =
-                attrs
-                |> Map.put(
-                  unquote(String.to_atom("#{rel[:name]}_id")),
-                  unquote(
-                    case optional?(rel) do
-                      true ->
-                        quote do
-                          case unquote(var(rel)) do
-                            nil ->
-                              nil
-
-                            _ ->
-                              unquote(var(rel)).id
-                          end
-                        end
-
-                      false ->
-                        quote do
-                          unquote(var(rel)).id
-                        end
-                    end
-                  )
-                )
-            end
-          end)
-        )
-
-        result =
-          with {:ok, unquote(var(e))} <-
-                 unquote(var(e))
-                 |> unquote(schema_module).changeset(attrs)
-                 |> unquote(repo_module).update() do
-            get_by_id(unquote(var(e)).id)
-          end
+        {:ok, unquote(var(e))} <-
+          unquote(var(e))
+          |> unquote(schema_module).changeset(attrs)
+          |> unquote(repo_module).update()
       end
 
-    [
+    refetch =
+      quote do
+        {:ok, unquote(var(e))} <- get_by_id(unquote(var(e)).id)
+      end
+
+    before_hooks = hooks(e, :before, :update)
+    after_hooks = hooks(e, :after, :update)
+
+    fun =
       quote do
         def update(
               unquote_splicing(
-                e[:relations]
-                |> Enum.filter(fn rel -> rel[:kind] == :belongs_to end)
-                |> Enum.map(&var(&1))
+                e
+                |> parent_relations()
+                |> vars()
               ),
               unquote(var(e)),
               attrs
             ) do
-          unquote(before_hook(e, :update))
-          unquote(fun_body)
-          unquote(after_hook(e, :update))
-          result
+          unquote(repo_module).transaction(fn ->
+            with unquote_splicing(
+                   [
+                     parent_relations,
+                     before_hooks,
+                     update,
+                     refetch,
+                     after_hooks
+                   ]
+                   |> flat()
+                   |> without_nils()
+                 ) do
+              unquote(var(e))
+            else
+              {:error, e} ->
+                unquote(repo_module).rollback(e)
+            end
+          end)
         end
       end
-      | funs
-    ]
+
+    [fun | funs]
   end
 
   defp with_api_delete_fun(funs, _e, schema_module, repo_module, _schema) do
@@ -2149,22 +2124,9 @@ defmodule Graphism do
       raise "custom action #{action} of #{e[:name]} does not define a :using option"
     end
 
-    fun_body =
-      quote do
-        result = unquote(opts[:using]).execute(attrs)
-      end
-
     quote do
       def unquote(action)(attrs) do
-        (unquote_splicing(
-           without_nils([
-             before_hook(e, action),
-             fun_body,
-             after_hook(e, action)
-           ])
-         ))
-
-        result
+        unquote(using_mod).execute(attrs)
       end
     end
   end
