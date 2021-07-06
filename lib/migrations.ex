@@ -294,10 +294,11 @@ defmodule Graphism.Migrations do
              nil
 
            columns_to_add ->
-             Enum.map(columns_to_add, fn col ->
-               column = schema[table][:columns][col]
-               [column: col, type: column[:type], opts: column[:opts], action: :add, kind: :column]
-             end)
+             columns_to_add =
+               Enum.map(columns_to_add, fn col ->
+                 column = schema[table][:columns][col]
+                 [column: col, type: column[:type], opts: column[:opts], action: :add, kind: :column]
+               end)
 
              alter_table_migration(table, columns_to_add, [])
          end
