@@ -615,6 +615,11 @@ defmodule Graphism do
     end
   end
 
+  defp default_value(true), do: true
+  defp default_value(false), do: false
+  defp default_value(v) when is_atom(v), do: "#{v}"
+  defp default_value(v), do: v
+
   defp schema_module(e, schema, _opts) do
     quote do
       defmodule unquote(e[:schema_module]) do
@@ -644,8 +649,18 @@ defmodule Graphism do
             e[:attributes]
             |> Enum.reject(fn attr -> attr[:name] == :id end)
             |> Enum.map(fn attr ->
-              quote do
-                Ecto.Schema.field(unquote(attr[:name]), unquote(attr[:kind]))
+              case attr[:opts][:default] do
+                nil ->
+                  quote do
+                    Ecto.Schema.field(unquote(attr[:name]), unquote(attr[:kind]))
+                  end
+
+                default ->
+                  default = default_value(default)
+
+                  quote do
+                    Ecto.Schema.field(unquote(attr[:name]), unquote(attr[:kind]), default: unquote(default))
+                  end
               end
             end)
           )
@@ -1976,21 +1991,6 @@ defmodule Graphism do
   end
 
   defp with_api_create_fun(funs, e, schema_module, repo_module, _schema) do
-    default_attrs =
-      e[:attributes]
-      |> Enum.filter(fn attr ->
-        Keyword.has_key?(attr[:opts], :default) &&
-          computed?(attr)
-      end)
-      |> Enum.map(fn attr ->
-        quote do
-          attrs <-
-            Map.put_new_lazy(attrs, unquote(attr[:name]), fn ->
-              unquote(attr[:opts][:default])
-            end)
-        end
-      end)
-
     parent_relations = attrs_with_parent_relations(e)
 
     insert =
@@ -2024,7 +2024,6 @@ defmodule Graphism do
                    [
                      parent_relations,
                      before_hooks,
-                     default_attrs,
                      insert,
                      refetch,
                      after_hooks
