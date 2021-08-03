@@ -377,7 +377,7 @@ defmodule Graphism do
   defmacro belongs_to(_name, _opts \\ []) do
   end
 
-  defmacro action(_name, _opts) do
+  defmacro action(_name, _opts \\ []) do
   end
 
   defmacro data(name, value) do
@@ -2797,10 +2797,16 @@ defmodule Graphism do
     []
   end
 
-  defp with_action_hook(opts, name) do
+  defp with_action_hook(opts, name, default \\ nil) do
     case opts[name] do
       nil ->
-        opts
+        case default do
+          nil ->
+            opts
+
+          _ ->
+            Keyword.put(opts, name, default)
+        end
 
       {:__aliases__, _, mod} ->
         Keyword.put(opts, name, Module.concat(mod))
@@ -2818,22 +2824,32 @@ defmodule Graphism do
 
   defp actions_from({:__block__, [], actions}) do
     actions
-    |> Enum.reduce([], fn
-      {:action, _, [name, opts]}, acc ->
-        opts =
-          opts
-          |> with_action_hook(:using)
-          |> with_action_hook(:before)
-          |> with_action_hook(:after)
-          |> with_action_hook(:allow)
+    |> Enum.reduce([], fn action, acc ->
+      case action_from(action) do
+        nil ->
+          acc
 
-        Keyword.put(acc, name, opts)
-
-      _, acc ->
-        acc
+        action ->
+          Keyword.put(acc, action[:name], action[:opts])
+      end
     end)
     |> without_nils()
   end
 
   defp actions_from(_), do: []
+
+  defp action_from({:action, _, [name, opts]}), do: action_from(name, opts)
+  defp action_from({:action, _, [name]}), do: action_from(name, [])
+  defp action_from(_), do: nil
+
+  defp action_from(name, opts) do
+    opts =
+      opts
+      |> with_action_hook(:using)
+      |> with_action_hook(:before)
+      |> with_action_hook(:after)
+      |> with_action_hook(:allow, Graphism.Allow.Always)
+
+    [name: name, opts: opts]
+  end
 end
