@@ -25,8 +25,10 @@ defmodule Graphism.MixProject do
       {:calendar, "~> 1.0.0"},
       {:dataloader, "~> 1.0.0"},
       {:ecto_sql, "~> 3.4"},
+      {:jason, "~> 1.2"},
       {:inflex, "~> 2.0.0"},
       {:libgraph, "~> 0.13.3"},
+      {:postgrex, ">= 0.0.0"},
       {:recase, "~> 0.5"}
     ]
   end
