@@ -337,7 +337,10 @@ defmodule Graphism do
     caller_module = __CALLER__.module
     data = Module.get_attribute(caller_module, :data)
 
-    attrs = attributes_from(block)
+    attrs =
+      attributes_from(block)
+      |> maybe_add_id_attribute()
+
     rels = relations_from(block)
     actions = actions_from(block)
 
@@ -2769,8 +2772,16 @@ defmodule Graphism do
     []
   end
 
-  defp attribute([name, kind]), do: [name: name, kind: kind, opts: []]
+  defp attribute([name, kind]), do: attribute([name, kind, []])
   defp attribute([name, kind, opts]), do: [name: name, kind: kind, opts: opts]
+
+  defp maybe_add_id_attribute(attrs) do
+    if attrs |> Enum.filter(fn attr -> attr[:name] == :id end) |> Enum.empty?() do
+      [attribute([:id, :id]) | attrs]
+    else
+      attrs
+    end
+  end
 
   defp relations_from({:__block__, [], attrs}) do
     attrs
