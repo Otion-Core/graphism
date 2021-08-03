@@ -241,7 +241,7 @@ defmodule Graphism do
              |> Enum.reject(&internal?(&1))
              |> Enum.flat_map(fn e ->
                [
-                 with_entity_action(e, :read, fn _ ->
+                 with_entity_action(e, :list, fn _ ->
                    quote do
                      field unquote(String.to_atom("#{e[:plural]}")),
                            non_null(unquote(String.to_atom("#{e[:plural]}_queries"))) do
@@ -249,7 +249,7 @@ defmodule Graphism do
                      end
                    end
                  end),
-                 with_entity_action(e, :list, fn _ ->
+                 with_entity_action(e, :read, fn _ ->
                    quote do
                      field unquote(String.to_atom("#{e[:name]}")),
                            non_null(unquote(String.to_atom("#{e[:name]}_queries"))) do
@@ -260,6 +260,9 @@ defmodule Graphism do
                ]
              end)
              |> without_nils()
+             |> raise_if_empty(
+               "No GraphQL queries could be extracted from your schema. Please ensure you have :read or :list actions in your entities"
+             )
            ))
         end
       end
@@ -304,6 +307,9 @@ defmodule Graphism do
                end
              end)
              |> without_nils()
+             |> raise_if_empty(
+               "No GraphQL mutations could be extracted from your schema. Please ensure you have actions in your entities other than :read and :list."
+             )
            ))
         end
       end
@@ -380,6 +386,14 @@ defmodule Graphism do
 
   defp without_nils(enum) do
     Enum.reject(enum, fn item -> item == nil end)
+  end
+
+  defp raise_if_empty(enum, msg) do
+    if Enum.empty?(enum) do
+      raise msg
+    end
+
+    enum
   end
 
   defp flat(enum), do: List.flatten(enum)
@@ -767,7 +781,7 @@ defmodule Graphism do
           changes = e |> cast(%{}, [])
 
           unquote_splicing(
-            # find all relations in the schema that 
+            # find all relations in the schema that
             # point to this entity
             schema
             |> Enum.flat_map(fn entity ->
@@ -1202,8 +1216,8 @@ defmodule Graphism do
                            unquote(Macro.var(e[:name], nil)).id
                          )
 
-                       # if the child input contains an id, 
-                       # and we are updating, then we assume we want to update, 
+                       # if the child input contains an id,
+                       # and we are updating, then we assume we want to update,
                        # if not we assume we want to create.
                        unquote(
                          case action do
@@ -2191,7 +2205,7 @@ defmodule Graphism do
     e[:relations]
     |> Enum.reject(fn rel ->
       # inside input types, we don't want to include children
-      # relations. Also we might want to skip certain entities depdencing 
+      # relations. Also we might want to skip certain entities depdencing
       # on the context
       Enum.member?(
         opts[:skip] || [],
