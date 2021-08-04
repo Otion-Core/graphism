@@ -96,6 +96,8 @@ You can use Graphism's convenience plug:
 
 ```elixir
 defmodule MyBlog.Endpoint do
+  use Plug.Router
+  
   use Graphism.Plug, schema: MyBlog.Schema
 end
 ```

@@ -29,8 +29,6 @@ defmodule Graphism.Plug do
     end
 
     quote do
-      use Plug.Router
-
       plug(Plug.Parsers,
         parsers: [:urlencoded, :multipart, :json, Absinthe.Plug.Parser],
         pass: ["*/*"],
@@ -44,7 +42,7 @@ defmodule Graphism.Plug do
 
       forward("/graphiql",
         to: Absinthe.Plug.GraphiQL,
-        init_opts: [schema: unquote(schema), interface: :simple]
+        init_opts: [schema: unquote(schema)]
       )
     end
   end
