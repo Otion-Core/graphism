@@ -387,6 +387,12 @@ defmodule Graphism do
     Module.put_attribute(__CALLER__.module, :data, {name, value})
   end
 
+  defmacro unique(_opts) do
+  end
+
+  defmacro string(_opts) do
+  end
+
   defp without_nils(enum) do
     Enum.reject(enum, fn item -> item == nil end)
   end
@@ -2754,14 +2760,8 @@ defmodule Graphism do
 
   defp attributes_from({:__block__, [], attrs}) do
     attrs
-    |> Enum.map(fn
-      {:attribute, _, attr} ->
-        attribute(attr)
-
-      _ ->
-        nil
-    end)
-    |> Enum.reject(fn attr -> attr == nil end)
+    |> Enum.map(&attribute/1)
+    |> without_nils()
   end
 
   defp attributes_from({:attribute, _, attr}) do
@@ -2772,8 +2772,18 @@ defmodule Graphism do
     []
   end
 
+  defp attribute({:attribute, _, opts}), do: attribute(opts)
   defp attribute([name, kind]), do: attribute([name, kind, []])
   defp attribute([name, kind, opts]), do: [name: name, kind: kind, opts: opts]
+
+  defp attribute({:unique, _, [opts]}) do
+    attr = attribute(opts)
+    modifiers = [:unique, get_in(attr, [:opts, :modifiers]) || []]
+    put_in(attr, [:opts, :modifiers], modifiers)
+  end
+
+  defp attribute({:string, _, [name]}), do: attribute([name, :string])
+  defp attribute(_), do: nil
 
   defp maybe_add_id_attribute(attrs) do
     if attrs |> Enum.filter(fn attr -> attr[:name] == :id end) |> Enum.empty?() do
