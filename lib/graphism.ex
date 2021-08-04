@@ -424,7 +424,9 @@ defmodule Graphism do
 
   defp validate_attribute_type!(type) do
     unless Enum.member?(@supported_attribute_types, type) do
-      raise "Unsupported attribute type #{inspect(type)}. Must be one of #{inspect(@supported_attribute_types)}"
+      raise "Unsupported attribute type #{inspect(type)}. Must be one of #{
+              inspect(@supported_attribute_types)
+            }"
     end
   end
 
@@ -598,9 +600,9 @@ defmodule Graphism do
               target = plurals[rel[:plural]]
 
               unless target do
-                raise "Entity #{e[:name]} has relation #{rel[:name]} of unknown type: #{inspect(Map.keys(plurals))}. Relation: #{
-                        inspect(rel)
-                      }"
+                raise "Entity #{e[:name]} has relation #{rel[:name]} of unknown type: #{
+                        inspect(Map.keys(plurals))
+                      }. Relation: #{inspect(rel)}"
               end
 
               rel
@@ -611,7 +613,9 @@ defmodule Graphism do
               target = index[rel[:name]]
 
               unless target do
-                raise "Entity #{e[:name]} has relation #{rel[:name]} of unknown type: #{inspect(Map.keys(index))}"
+                raise "Entity #{e[:name]} has relation #{rel[:name]} of unknown type: #{
+                        inspect(Map.keys(index))
+                      }"
               end
 
               rel
@@ -682,7 +686,9 @@ defmodule Graphism do
                   default = default_value(default)
 
                   quote do
-                    Ecto.Schema.field(unquote(attr[:name]), unquote(attr[:kind]), default: unquote(default))
+                    Ecto.Schema.field(unquote(attr[:name]), unquote(attr[:kind]),
+                      default: unquote(default)
+                    )
                   end
               end
             end)
@@ -893,7 +899,9 @@ defmodule Graphism do
           rel[:name]
         end)
 
-      raise "no such relation #{name} in entity #{e[:name]}. Existing relations: #{inspect(relations)}"
+      raise "no such relation #{name} in entity #{e[:name]}. Existing relations: #{
+              inspect(relations)
+            }"
     end
 
     rel
@@ -1124,7 +1132,9 @@ defmodule Graphism do
               has_id_arg?(opts)
 
           parent_relations(e)
-          |> Enum.flat_map(&parent_auth_context(e, &1, schema, context_var_from_entity: context_var_from_entity))
+          |> Enum.flat_map(
+            &parent_auth_context(e, &1, schema, context_var_from_entity: context_var_from_entity)
+          )
 
         _ ->
           false
@@ -1234,7 +1244,9 @@ defmodule Graphism do
                              quote do
                                case Map.get(child, :id, nil) do
                                  nil ->
-                                   unquote(inline_relation_resolver_call(resolver_module, :create))
+                                   unquote(
+                                     inline_relation_resolver_call(resolver_module, :create)
+                                   )
 
                                  _ ->
                                    unquote(inline_relation_resolver_call(resolver_module, action))
@@ -1431,7 +1443,9 @@ defmodule Graphism do
                     case opts[:mode] do
                       nil ->
                         quote do
-                          unquote(target[:api_module]).get_by_id(unquote(var(:args)).unquote(rel[:name]))
+                          unquote(target[:api_module]).get_by_id(
+                            unquote(var(:args)).unquote(rel[:name])
+                          )
                         end
 
                       :update ->
@@ -1574,7 +1588,9 @@ defmodule Graphism do
                 [] ->
                   quote do
                     unquote(api_module).create(
-                      unquote_splicing((e |> parent_relations() |> names() |> vars()) ++ [var(:args)])
+                      unquote_splicing(
+                        (e |> parent_relations() |> names() |> vars()) ++ [var(:args)]
+                      )
                     )
                   end
 
@@ -1589,7 +1605,9 @@ defmodule Graphism do
                     unquote(opts[:repo]).transaction(fn ->
                       with {:ok, unquote(var(e))} <-
                              unquote(api_module).create(
-                               unquote_splicing((e |> parent_relations() |> names() |> vars()) ++ [var(:args)])
+                               unquote_splicing(
+                                 (e |> parent_relations() |> names() |> vars()) ++ [var(:args)]
+                               )
                              ),
                            :ok <-
                              create_inline_relations(
@@ -1637,7 +1655,9 @@ defmodule Graphism do
                   [] ->
                     quote do
                       unquote(api_module).update(
-                        unquote_splicing((e |> parent_relations() |> names() |> vars()) ++ [var(e), var(:args)])
+                        unquote_splicing(
+                          (e |> parent_relations() |> names() |> vars()) ++ [var(e), var(:args)]
+                        )
                       )
                     end
 
@@ -1653,7 +1673,8 @@ defmodule Graphism do
                         with {:ok, unquote(var(e))} <-
                                unquote(api_module).update(
                                  unquote_splicing(
-                                   (e |> parent_relations() |> names() |> vars()) ++ [var(e), var(:args)]
+                                   (e |> parent_relations() |> names() |> vars()) ++
+                                     [var(e), var(:args)]
                                  )
                                ),
                              :ok <-
@@ -1792,8 +1813,9 @@ defmodule Graphism do
       quote do
         def list(context) do
           query =
-            from unquote(var(e)) in unquote(schema_module),
+            from(unquote(var(e)) in unquote(schema_module),
               order_by: [asc: :inserted_at]
+            )
 
           unquote(
             with_entity_scope(e, :list, fn ->
@@ -2157,7 +2179,9 @@ defmodule Graphism do
            name == e[:name]
          end) do
       [] ->
-        raise "Could not resolve entity #{name}: #{inspect(Enum.map(schema, fn e -> e[:name] end))}"
+        raise "Could not resolve entity #{name}: #{
+                inspect(Enum.map(schema, fn e -> e[:name] end))
+              }"
 
       [e] ->
         e
@@ -2220,7 +2244,8 @@ defmodule Graphism do
         opts[:skip] || [],
         rel[:target]
       ) ||
-        ((computed?(rel) || rel[:kind] == :has_many) && (opts[:mode] == :input || opts[:mode] == :update_input))
+        ((computed?(rel) || rel[:kind] == :has_many) &&
+           (opts[:mode] == :input || opts[:mode] == :update_input))
     end)
     |> Enum.map(fn rel ->
       optional =
@@ -2453,7 +2478,10 @@ defmodule Graphism do
         field unquote(String.to_atom("by_#{attr[:name]}")),
               non_null(unquote(e[:name])) do
           unquote_splicing(args)
-          resolve(&(unquote(e[:resolver_module]).unquote(String.to_atom("get_by_#{attr[:name]}")) / 3))
+
+          resolve(
+            &(unquote(e[:resolver_module]).unquote(String.to_atom("get_by_#{attr[:name]}")) / 3)
+          )
         end
       end
     end)
@@ -2471,7 +2499,9 @@ defmodule Graphism do
               list_of(unquote(e[:name])) do
           arg(unquote(rel[:name]), non_null(:id))
 
-          resolve(&(unquote(e[:resolver_module]).unquote(String.to_atom("list_by_#{rel[:name]}")) / 3))
+          resolve(
+            &(unquote(e[:resolver_module]).unquote(String.to_atom("list_by_#{rel[:name]}")) / 3)
+          )
         end
       end
     end)
@@ -2869,7 +2899,7 @@ defmodule Graphism do
       |> with_action_hook(:using)
       |> with_action_hook(:before)
       |> with_action_hook(:after)
-      |> with_action_hook(:allow, Graphism.Allow.Always)
+      |> with_action_hook(:allow, Graphism.Hooks.Allow.Always)
 
     [name: name, opts: opts]
   end
