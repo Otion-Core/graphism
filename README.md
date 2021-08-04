@@ -14,50 +14,70 @@ This library can be installed by adding `graphism` to your list of dependencies 
 ```elixir
 def deps do
   [
-    {:graphism,
-        git: "https://github.com/gravity-core/graphism.git", branch: "main"}
+    {:graphism, git: "https://github.com/gravity-core/graphism.git", branch: "main"}
   ]
 end
 ```
 
-## Your first schema :world_map:
-
-Define a new schema module 
+Also add `:graphism` to your extra applications:
 
 ```elixir
-defmodule MyBlogWeb.Schema do
+ def application do
+    [
+      extra_applications: [:graphism],
+      ...
+    ]
+  end
+
+```
+
+## Your first schema :world_map:
+
+Assuming you already have an Ecto repo, define a new schema module with your entities, attributes, relations and actions: 
+
+```elixir
+defmodule MyBlog.Schema do
   use Graphism,
     repo: MyBlog.Repo
 
     
   entity :post do
-    attribute :id, :id
-    attribute :title, :string
-    attribute :body, :string
+    string(:body)
     has_many :comments
+
+    action(:read)
+    action(:list)
+    action(:create)
+    action(:update)
+    action(:delete)
   end
 
   entity :comment do
-    attribute :id, :id
-    attribute :body, :string
+    string(:body)
     belongs_to :post
+
+    action(:read)
+    action(:list)
+    action(:create)
+    action(:update)
+    action(:delete)
   end
 end
 
 ```
 
+Graphism will automatically add unique IDs as UUIDs to all entities in your schema.
+
 ## Generate migrations :building_construction:
 
-Graphism will keep track of your schema changes and 
-generate proper Ecto migrations:
+Graphism will keep track of your schema changes and generate proper Ecto migrations:
 
 
 First, you need to tell graphism about your schema. In your config.exs,
 
 
 ```elixir
-config :graphism,
-  schema: MyBlogWeb.Schema
+config :graphism, schema: MyBlog.Schema
 ```
 
 Then:
@@ -67,8 +87,44 @@ $ mix graphism.gen.migrations
 
 ```
 
-Do not forget to run `mix ecto.migrate` afterwards.
+Do not forget to run `mix ecto.migrate`.
 
+## Expose your GraphQL api
+
+You can use Graphism's convenience plug:
+
+
+```elixir
+defmodule MyBlog.Endpoint do
+  use Graphism.Plug, schema: MyBlog.Schema
+end
+```
+
+This will make your GraphQL api available at `/api`. Also, you will have a GraphiQL UI at `/graphiql`. Internally, `Graphism.Plug` wraps `Abinsthe.Plug`.
+
+Finally, you can easily add the endpoint to your supervision tree:
+
+```elixir
+defmodule MyBlog.Application do
+  def start(_type, _args) do
+    children = [
+      ...,
+      {MyBlog.Repo, []},
+      Plug.Cowboy.child_spec(
+        scheme: :http,
+        plug: MyBlog.Endpoint,
+        options: [port: 4000]
+      ),
+      ...
+    ]
+
+    opts = [strategy: :one_for_one, name: Bonny.Supervisor]
+    Supervisor.start_link(children, opts)
+  end
+end
+```
+
+For convenience, `Plug.Cowboy` is automatically downloaded by Graphism, so you don't need to add it to your project.
 
 ## Schema Modifiers :abacus:
 
