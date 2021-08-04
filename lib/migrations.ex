@@ -797,6 +797,8 @@ defmodule Graphism.Migrations do
       Calendar.DateTime.now_utc()
       |> Calendar.Strftime.strftime("%Y%m%d%H%M%S")
 
+    File.mkdir_p!(opts[:dir])
+
     path =
       Path.join([
         opts[:dir],
