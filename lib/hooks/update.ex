@@ -9,5 +9,5 @@ defmodule Graphism.Hooks.Update do
   @type data :: map()
   @type result :: {:ok, data()} | {:error, term()}
 
-  @callback execute?(entity(), data()) :: result()
+  @callback execute(entity(), data()) :: result()
 end

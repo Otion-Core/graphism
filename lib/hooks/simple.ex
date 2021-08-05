@@ -7,5 +7,5 @@ defmodule Graphism.Hooks.Simple do
   @type data :: map()
   @type result :: {:ok, data()} | {:error, term()}
 
-  @callback execute?(data()) :: result()
+  @callback execute(data()) :: result()
 end
