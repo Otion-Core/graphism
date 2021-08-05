@@ -393,6 +393,15 @@ defmodule Graphism do
   defmacro string(_opts) do
   end
 
+  defmacro integer(_opts) do
+  end
+
+  defmacro float(_opts) do
+  end
+
+  defmacro boolean(_opts) do
+  end
+
   defp without_nils(enum) do
     Enum.reject(enum, fn item -> item == nil end)
   end
@@ -2813,6 +2822,9 @@ defmodule Graphism do
   end
 
   defp attribute({:string, _, [name]}), do: attribute([name, :string])
+  defp attribute({:integer, _, [name]}), do: attribute([name, :integer])
+  defp attribute({:boolean, _, [name]}), do: attribute([name, :boolean])
+  defp attribute({:float, _, [name]}), do: attribute([name, :float])
   defp attribute(_), do: nil
 
   defp maybe_add_id_attribute(attrs) do
