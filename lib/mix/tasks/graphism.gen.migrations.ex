@@ -15,13 +15,13 @@ defmodule Mix.Tasks.Graphism.Gen.Migrations do
 
   @impl true
   def run(_args) do
-    Mix.Task.run("app.start")
+    Mix.Task.run("compile")
 
     schema = Application.get_env(:graphism, :schema)
 
     unless schema do
       raise """
-        Please specify your graphism schema, eg: 
+        Please specify your graphism schema, eg:
 
         config :graphism, schema: Your.Schema
       """
