@@ -805,7 +805,7 @@ defmodule Graphism.Migrations do
         "#{timestamp}_graphism_v#{version}.exs"
       ])
 
-    File.write!(path, code)
+    File.write!(path, code ++ ["\n"])
     IO.puts("Written #{path}")
   end
 
