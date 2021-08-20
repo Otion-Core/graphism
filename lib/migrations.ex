@@ -9,20 +9,31 @@ defmodule Graphism.Migrations do
   Generate migrations for the given schema.
 
   """
-  def generate(module: mod) do
+  def generate(opts) do
+    default_opts = [
+      dir: Path.join([File.cwd!(), "priv/repo/migrations"]),
+      write_to_disk: true
+    ]
+
+    opts = Keyword.merge(default_opts, opts)
+    mod = Keyword.fetch!(opts, :module)
     schema = mod.schema()
     enums = mod.enums()
 
-    migrations_dir = Path.join([File.cwd!(), "priv/repo/migrations"])
-    migrations_files = Path.join([migrations_dir, "*_graphism_*.exs"])
+    existing_migrations =
+      (opts[:files] ||
+         Path.join([opts[:dir], "*_graphism_*.exs"])
+         |> Path.wildcard()
+         |> Enum.sort()
+         |> Enum.map(&File.read!(&1)))
+      |> Enum.map(&Code.string_to_quoted!(&1))
 
-    migrations = existing_migrations(migrations_files)
+    last_migration_version = last_migration_version(existing_migrations)
 
     existing_migrations =
-      read_migrations(migrations)
+      existing_migrations
+      |> read_migrations()
       |> reduce_migrations()
-
-    last_migration_version = last_migration_version(migrations)
 
     schema_migration = migration_from_schema(schema, enums)
 
@@ -32,7 +43,7 @@ defmodule Graphism.Migrations do
         schema_migration
       )
 
-    write_migration(missing_migrations, last_migration_version + 1, dir: migrations_dir)
+    write_migration(missing_migrations, last_migration_version + 1, opts)
   end
 
   defp without_nils(enum) do
@@ -415,14 +426,6 @@ defmodule Graphism.Migrations do
     [column: col, type: spec[:type], opts: spec[:opts], action: action, kind: :column]
   end
 
-  defp existing_migrations(migrations) do
-    migrations
-    |> Path.wildcard()
-    |> Enum.sort()
-    |> Enum.map(&File.read!(&1))
-    |> Enum.map(&Code.string_to_quoted!(&1))
-  end
-
   defp read_migrations(migrations) do
     migrations
     |> Enum.flat_map(&parse_migration(&1))
@@ -775,8 +778,13 @@ defmodule Graphism.Migrations do
     {String.to_atom(enum), Enum.map(values, &String.to_atom(&1))}
   end
 
-  defp write_migration([], _, _) do
-    IO.puts("No migrations to write")
+  defp write_migration([], _, opts) do
+    if Keyword.get(opts, :write_to_disk, true) do
+      IO.puts("No migrations to write")
+      :ok
+    else
+      []
+    end
   end
 
   defp write_migration(migration, version, opts) do
@@ -797,16 +805,21 @@ defmodule Graphism.Migrations do
       Calendar.DateTime.now_utc()
       |> Calendar.Strftime.strftime("%Y%m%d%H%M%S")
 
-    File.mkdir_p!(opts[:dir])
-
     path =
       Path.join([
         opts[:dir],
         "#{timestamp}_graphism_v#{version}.exs"
       ])
 
-    File.write!(path, code ++ ["\n"])
-    IO.puts("Written #{path}")
+    code = code ++ ["\n"]
+
+    if Keyword.get(opts, :write_to_disk, true) do
+      File.mkdir_p!(opts[:dir])
+      File.write!(path, code)
+      IO.puts("Written #{path}")
+    else
+      [path: path, code: IO.iodata_to_binary(code)]
+    end
   end
 
   defp table_references(m) do
