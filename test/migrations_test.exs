@@ -35,9 +35,12 @@ defmodule MigrationsTest do
       ]
     ]
 
-    assert [migration] = Migrations.generate(opts)
+    assert [path: _, code: code] = Migrations.generate(opts)
+    assert code
+    assert code =~ "alter(table(:blogs))"
+    assert code =~ "modify(:tags, :string, null: true)"
 
-    assert migration =~ "alter(table(:blogs))"
-    assert migration =~ "modify :tags, :string, null: true"
+    opts = Keyword.put(opts, :files, opts[:files] ++ [code])
+    assert [] = Migrations.generate(opts)
   end
 end
