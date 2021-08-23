@@ -261,6 +261,7 @@ defmodule Graphism.Migrations do
     |> without_old_tables(existing, schema)
     |> without_old_enums(existing_enums, schema_enums)
     |> with_existing_columns_modified(existing, schema)
+    |> with_existing_enums_modified(existing_enums, schema_enums)
   end
 
   defp empty_migration, do: []
@@ -272,6 +273,27 @@ defmodule Graphism.Migrations do
       Enum.map(enums_to_create, fn enum ->
         create_enum_migration(enum, schema_enums[enum])
       end)
+  end
+
+  defp with_existing_enums_modified(migrations, existing_enums, schema_enums) do
+    enums_to_modify = Map.keys(schema_enums) -- Map.keys(schema_enums) -- Map.keys(existing_enums)
+
+    migrations ++
+      (enums_to_modify
+       |> Enum.map(fn enum ->
+         case schema_enums[enum] -- existing_enums[enum][:values] do
+           [] ->
+             nil
+
+           new_values ->
+             Enum.map(new_values, fn value -> %{enum: enum, value: value} end)
+         end
+       end)
+       |> without_nils()
+       |> List.flatten()
+       |> Enum.map(fn %{enum: enum, value: value} ->
+         alter_enum_migration(enum, value)
+       end))
   end
 
   defp with_new_tables(migrations, existing, schema) do
@@ -485,6 +507,10 @@ defmodule Graphism.Migrations do
     [enum: enum, action: :drop, kind: :enum, values: values]
   end
 
+  defp alter_enum_migration(enum, value) do
+    [enum: enum, action: :alter, kind: :enum, value: value]
+  end
+
   defp alter_table_migration(name, columns) do
     [
       table: name,
@@ -628,6 +654,26 @@ defmodule Graphism.Migrations do
 
   defp reduce_migration([enum: enum, action: :create, kind: :enum, values: values], acc) do
     put_in(acc, [:__enums, enum], %{enum: enum, values: values})
+  end
+
+  defp reduce_migration([enum: enum, action: :add_value, kind: :enum, values: value], acc) do
+    key = [:__enums, enum]
+
+    enum_attrs = get_in(acc, key)
+
+    unless enum_attrs do
+      raise "No enum attributes found in #{inspect(acc)} at #{inspect(key)}. This is a bug!"
+    end
+
+    put_in(acc, key, %{enum_attrs | values: enum_attrs.values ++ [value]})
+  end
+
+  defp reduce_migration([enum: enum, action: :drop, kind: :enum, values: _], acc) do
+    enums =
+      acc[:__enums]
+      |> Map.drop([enum])
+
+    Map.put(acc, :__enums, enums)
   end
 
   defp last_migration_version(migrations) do
@@ -806,6 +852,27 @@ defmodule Graphism.Migrations do
     enum_change(enum, :create, values)
   end
 
+  defp parse_up(
+         {:execute, _,
+          [
+            "alter type " <> enum_expr
+          ]}
+       ) do
+    {enum, value} = parse_enum_add_value_expression(enum_expr)
+    enum_change(enum, :add_value, value)
+  end
+
+  defp parse_up(
+         {:execute, _,
+          [
+            "drop type " <> enum
+          ]}
+       ) do
+    enum
+    |> String.to_atom()
+    |> enum_change(:drop, nil)
+  end
+
   defp parse_up(other) do
     Logger.warn(
       "Unable to parse migration code #{inspect(other)}: #{other |> Macro.to_string() |> Code.format_string!()}"
@@ -869,6 +936,16 @@ defmodule Graphism.Migrations do
       |> String.split(" ")
 
     {String.to_atom(enum), Enum.map(values, &String.to_atom(&1))}
+  end
+
+  defp parse_enum_add_value_expression(expr) do
+    [enum, _, value] =
+      expr
+      |> String.replace("add value", "")
+      |> String.replace("'", "")
+      |> String.split(" ")
+
+    {String.to_atom(enum), String.to_atom(value)}
   end
 
   defp write_migration([], _, opts) do
@@ -1088,6 +1165,20 @@ defmodule Graphism.Migrations do
          |> Enum.map(fn value -> "'#{value}'" end)
          |> Enum.join(",")
        })"
+     ]}
+  end
+
+  defp quote_migration(enum: name, action: :alter, kind: :enum, value: value) do
+    {:execute, [line: 1],
+     [
+       "alter type #{name} add value '#{value}'"
+     ]}
+  end
+
+  defp quote_migration(enum: name, action: :drop, kind: :enum, values: _) do
+    {:execute, [line: 1],
+     [
+       "drop type #{name}"
      ]}
   end
 
