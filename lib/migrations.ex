@@ -460,8 +460,10 @@ defmodule Graphism.Migrations do
 
              index_migrations =
                columns_to_modify
+               |> Enum.filter(&(!schema_migration[table][:columns][&1][:opts][:references]))
                |> Enum.map(fn col ->
                  schema_column = schema_migration[table][:columns][col]
+
                  existing_indices = existing_migration[table][:indices]
                  entity = entity_from_table_name!(table, schema)
 
@@ -980,16 +982,24 @@ defmodule Graphism.Migrations do
   end
 
   defp column_change({action, _, [name, type]}) do
-    %{column: name, type: type, opts: [], action: action, kind: :column}
+    column_change({action, nil, [name, type, []]})
   end
 
   defp column_change({action, _, [name, type, opts]}) do
-    %{column: name, type: type, opts: opts, action: action, kind: :column}
+    type_change(%{column: name, opts: opts, action: action, kind: :column}, type)
   end
 
   defp column_change({action, _, [name]}) do
     %{column: name, action: action, kind: :column}
   end
+
+  defp type_change(col, {:references, _, [table, [type: type]]}) do
+    col
+    |> put_in([:opts, :references], table)
+    |> Map.put(:type, type)
+  end
+
+  defp type_change(col, type) when is_atom(type), do: Map.put(col, :type, type)
 
   defp index_change(table, action, columns, opts) do
     %{index: opts[:name], action: action, kind: :index, table: table, columns: columns}
