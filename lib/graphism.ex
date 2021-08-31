@@ -8,15 +8,13 @@ defmodule Graphism do
   """
 
   require Logger
+  alias Graphism.Metrics
 
   defmacro __using__(opts \\ []) do
+    otp_app = Keyword.fetch!(opts, :otp_app)
+    repo = Keyword.fetch!(opts, :repo)
+
     Code.compiler_options(ignore_module_conflict: true)
-
-    repo = opts[:repo]
-
-    unless repo do
-      raise "Please specify a repo module when using Graphism"
-    end
 
     Module.register_attribute(__CALLER__.module, :data,
       accumulate: true,
@@ -33,7 +31,14 @@ defmodule Graphism do
       persist: true
     )
 
-    Module.put_attribute(__CALLER__.module, :repo, opts[:repo])
+    Module.register_attribute(__CALLER__.module, :otp_app,
+      accumulate: false,
+      persist: true
+    )
+
+    Module.put_attribute(__CALLER__.module, :otp_app, otp_app)
+
+    Module.put_attribute(__CALLER__.module, :repo, repo)
 
     alias Dataloader, as: DL
 
@@ -86,6 +91,10 @@ defmodule Graphism do
     repo =
       __CALLER__.module
       |> Module.get_attribute(:repo)
+
+    otp_app =
+      __CALLER__.module
+      |> Module.get_attribute(:otp_app)
 
     data =
       __CALLER__.module
@@ -314,6 +323,8 @@ defmodule Graphism do
         end
       end
 
+    metrics = Metrics.prom_ex_plugin(otp_app: otp_app)
+
     List.flatten([
       schema_settings,
       enums_fun,
@@ -329,7 +340,8 @@ defmodule Graphism do
       entities_queries,
       queries,
       entities_mutations,
-      mutations
+      mutations,
+      metrics
     ])
   end
 

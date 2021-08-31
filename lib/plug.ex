@@ -6,29 +6,31 @@ defmodule Graphism.Plug do
 
   ```
   defmodule MySchema do
-    use Graphism.Schema
+    use Graphism.Schema, repo: MyRepo, otp_app: :my_app,
 
     ...
   end
 
   defmodule MyEndpoint do
-    use Graphism.Plug, schema: MySchema
+    use Graphism.Plug, schema: MySchema, metrics: "/metrics"
 
     match _ do
       send_resp(conn, 404, "")
     end
   end
   ```
+
+  This will include a /metrics endpoint with Absinthe prometheus metrics
+  based on PromEx
   """
 
   defmacro __using__(opts) do
-    schema = opts[:schema]
-
-    unless schema do
-      raise "Please specify a :schema to Graphism.Plug"
-    end
+    schema = Keyword.fetch!(opts, :schema)
+    metrics_path = opts[:metrics] || "/metrics"
 
     quote do
+      plug(PromEx.Plug, prom_ex_module: unquote(schema).Metrics, path: unquote(metrics_path))
+
       plug(Plug.Parsers,
         parsers: [:urlencoded, :multipart, :json, Absinthe.Plug.Parser],
         pass: ["*/*"],

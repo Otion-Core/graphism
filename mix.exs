@@ -21,7 +21,7 @@ defmodule Graphism.MixProject do
   # Run "mix help deps" to learn about dependencies.
   defp deps do
     [
-      {:absinthe, "~> 1.5"},
+      {:absinthe, "~> 1.6.5"},
       {:absinthe_plug, "~> 1.5"},
       {:calendar, "~> 1.0.0"},
       {:dataloader, "~> 1.0.0"},
@@ -31,7 +31,9 @@ defmodule Graphism.MixProject do
       {:libgraph, "~> 0.13.3"},
       {:plug_cowboy, "~> 2.0"},
       {:postgrex, ">= 0.0.0"},
-      {:recase, "~> 0.5"}
+      {:prom_ex, git: "https://github.com/pedro-gutierrez/prom_ex.git", tag: "1.3.1"},
+      {:recase, "~> 0.5"},
+      {:telemetry, "~> 1.0", override: true}
     ]
   end
 end

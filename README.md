@@ -38,7 +38,8 @@ Assuming you already have an Ecto repo, define a new schema module with your ent
 ```elixir
 defmodule MyBlog.Schema do
   use Graphism,
-    repo: MyBlog.Repo
+    repo: MyBlog.Repo,
+    otp_app: :my_app
 
     
   entity :post do
@@ -127,6 +128,32 @@ end
 ```
 
 For convenience, `Plug.Cowboy` is automatically downloaded by Graphism, so you don't need to add it to your project.
+
+## Observability
+
+By default, Graphism embeds the great PromEx library in order to provide with built-in Prometheus metrics for all of your generated schema queries and mutations, but also for your Ecto repositories. 
+
+For example, if your Graphism schema is `MyBlog.Schema`, then all your need to do is to add the generated 
+module `MyBlog.Schema.Metrics` to the top of your supervision tree.
+
+```elixir
+defmodule MyBlog.Application do
+  def start(_type, _args) do
+    children = [
+      MyBlog.Schema.Metrics,
+      ...
+    ]
+    ...
+  end
+  ...
+```
+
+With this simple configuration, your metrics will be available at "/metrics". If you wished to customize 
+the path, add the `metrics` option to your Graphism.Plug:
+
+```elixir
+use Graphism.Plug, schema: MyBlog.Schema, metrics: "/metrics/blog"
+```
 
 ## Schema Modifiers :abacus:
 
