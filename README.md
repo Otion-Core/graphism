@@ -223,7 +223,7 @@ end
 ```
 
 
-It is essential to provide the implementation for your custom action as a simple Graphism hook.
+It is essential to provide the implementation for your custom action as a simple `:using` Graphism hook.
 
 
 ### Hooks
