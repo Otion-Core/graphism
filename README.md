@@ -155,25 +155,40 @@ the path, add the `metrics` option to your Graphism.Plug:
 use Graphism.Plug, schema: MyBlog.Schema, metrics: "/metrics/blog"
 ```
 
-## Schema Modifiers :abacus:
+## Schema Features :abacus:
 
-We have two types of modifiers. Entity modifiers and attribute modifiers. They both allow customizations in behaviour.
+### Optional attributes
 
-### Entity modifiers
+Any standard attribute can be made optional:
 
-| Modifier | Description |
-| --- | --- | 
-| `internal`   |  indicates the entity is persisted, but is not part of the graphql api |
-| `virtual` | indicates the entity is part of the graphql api, but is not persisted |
+```elixir
+entity :post do
+  optional(boolean(:draft))
+  ...
+end
+```
 
-### Attribute modifiers
+Optional attributes will not be required in mutations.
 
-| Modifier | Description |
-| --- | --- | 
-| `optional`    |  indicates the attribute is optional (ie can be omitted in mutations, and will accept null values in the database) |
-| `private`    | indicates the attribute is private and can only be written from the graphql api|
-| `computed`    | indicates the attribute is computed and can only be read from the graphql api|
+### Default values
 
+It is possible to defined default values for attributes that are optional. 
+
+```elixir
+entity :post do
+  optional(boolean(:draft), default: true)
+  ...
+end
+```
+
+The above can also be expressed:
+
+```elixir
+entity :post do
+  optional(boolean(:draft, default: true))
+  ...
+end
+```
 
 ## Github Workflow :dna:
 Our commit convention follows [conventionalcommits.org](https://www.conventionalcommits.org) workflow.

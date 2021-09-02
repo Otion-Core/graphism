@@ -399,22 +399,22 @@ defmodule Graphism do
     Module.put_attribute(__CALLER__.module, :data, {name, value})
   end
 
-  defmacro unique(_opts) do
+  defmacro unique(_name, _opts \\ []) do
   end
 
-  defmacro optional(_opts) do
+  defmacro optional(_attr, _opts \\ []) do
   end
 
-  defmacro string(_opts) do
+  defmacro string(_name, _opts \\ []) do
   end
 
-  defmacro integer(_opts) do
+  defmacro integer(_name, _opts \\ []) do
   end
 
-  defmacro float(_opts) do
+  defmacro float(_name, _opts \\ []) do
   end
 
-  defmacro boolean(_opts) do
+  defmacro boolean(_name, _opts \\ []) do
   end
 
   defp without_nils(enum) do
@@ -2820,6 +2820,14 @@ defmodule Graphism do
   defp attribute({:integer, _, [name]}), do: attribute([name, :integer])
   defp attribute({:boolean, _, [name]}), do: attribute([name, :boolean])
   defp attribute({:float, _, [name]}), do: attribute([name, :float])
+
+  defp attribute({kind, _, [attr, opts]}) do
+    with attr when attr != nil <- attribute({kind, nil, [attr]}) do
+      opts = Keyword.merge(attr[:opts], opts)
+      Keyword.put(attr, :opts, opts)
+    end
+  end
+
   defp attribute(_), do: nil
 
   defp maybe_add_id_attribute(attrs) do
