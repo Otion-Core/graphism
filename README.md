@@ -190,6 +190,19 @@ entity :post do
 end
 ```
 
+### Computed attributes
+
+Computed attributes are part of your schema, they are stored, and can also be queried.
+
+However, since they are computed, they won't be included in your mutations, therefore it is not possible to modify their values explicitly.
+
+```elixir
+entity :post do
+  computed(boolean(:draft, default: true)
+  ...
+end
+```
+
 ### Standard actions
 
 Graphism provides with five basic standard actions:

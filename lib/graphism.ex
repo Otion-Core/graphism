@@ -405,6 +405,9 @@ defmodule Graphism do
   defmacro optional(_attr, _opts \\ []) do
   end
 
+  defmacro computed(_attr, _opts \\ []) do
+  end
+
   defmacro string(_name, _opts \\ []) do
   end
 
@@ -2809,6 +2812,12 @@ defmodule Graphism do
   defp attribute({:optional, _, [opts]}) do
     attr = attribute(opts)
     modifiers = [:optional | get_in(attr, [:opts, :modifiers]) || []]
+    put_in(attr, [:opts, :modifiers], modifiers)
+  end
+
+  defp attribute({:computed, _, [opts]}) do
+    attr = attribute(opts)
+    modifiers = [:computed | get_in(attr, [:opts, :modifiers]) || []]
     put_in(attr, [:opts, :modifiers], modifiers)
   end
 
