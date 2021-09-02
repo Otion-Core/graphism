@@ -354,7 +354,7 @@ defmodule Graphism do
       |> maybe_add_id_attribute()
 
     rels = relations_from(block)
-    actions = actions_from(block)
+    actions = actions_from(block, name)
 
     {actions, custom_actions} = split_actions(actions)
 
@@ -2747,19 +2747,15 @@ defmodule Graphism do
   end
 
   defp graphql_custom_mutation(e, action, opts, _schema) do
-    unless opts[:args] do
-      raise "Custom action #{action} in #{e[:name]} has no arguments"
-    end
-
-    unless opts[:produces] do
-      raise "Custom action #{action} in #{e[:name]} does not define an output type. Please set a :produces kind"
-    end
+    args = opts[:args]
+    produces = opts[:produces]
+    desc = opts[:desc] || "Custom action"
 
     quote do
-      @desc "Custom action"
-      field unquote(action), non_null(unquote(opts[:produces])) do
+      @desc unquote(desc)
+      field unquote(action), non_null(unquote(produces)) do
         (unquote_splicing(
-           Enum.map(opts[:args], fn
+           Enum.map(args, fn
              {arg, kind} ->
                quote do
                  arg(unquote(arg), non_null(unquote(kind)))
@@ -2888,10 +2884,26 @@ defmodule Graphism do
     end
   end
 
-  defp actions_from({:__block__, [], actions}) do
+  defp with_action_produces(opts, entity_name) do
+    if !built_in_action?(opts[:name]) && !opts[:produces] do
+      Keyword.put(opts, :produces, entity_name)
+    else
+      opts
+    end
+  end
+
+  defp with_action_args(opts) do
+    if opts[:produces] && !opts[:args] do
+      Keyword.put(opts, :args, [:id])
+    else
+      opts
+    end
+  end
+
+  defp actions_from({:__block__, [], actions}, entity_name) do
     actions
     |> Enum.reduce([], fn action, acc ->
-      case action_from(action) do
+      case action_from(action, entity_name) do
         nil ->
           acc
 
@@ -2902,18 +2914,20 @@ defmodule Graphism do
     |> without_nils()
   end
 
-  defp actions_from(_), do: []
+  defp actions_from(_, _), do: []
 
-  defp action_from({:action, _, [name, opts]}), do: action_from(name, opts)
-  defp action_from({:action, _, [name]}), do: action_from(name, [])
-  defp action_from(_), do: nil
+  defp action_from({:action, _, [name, opts]}, entity_name), do: action_from(name, opts, entity_name)
+  defp action_from({:action, _, [name]}, entity_name), do: action_from(name, [], entity_name)
+  defp action_from(_, _), do: nil
 
-  defp action_from(name, opts) do
+  defp action_from(name, opts, entity_name) do
     opts =
       opts
       |> with_action_hook(:using)
       |> with_action_hook(:before)
       |> with_action_hook(:after)
+      |> with_action_produces(entity_name)
+      |> with_action_args()
       |> with_action_hook(:allow, Graphism.Hooks.Allow.Always)
 
     [name: name, opts: opts]

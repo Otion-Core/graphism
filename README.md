@@ -181,14 +181,62 @@ entity :post do
 end
 ```
 
-The above can also be expressed:
+For convenience, the above can also be expressed as:
 
 ```elixir
 entity :post do
-  optional(boolean(:draft, default: true))
+  optional(boolean(:draft, default: true)
   ...
 end
 ```
+
+### Standard actions
+
+Graphism provides with five basic standard actions:
+
+* `read`
+* `list`
+* `create`
+* `update`
+* `delete`
+
+### User defined actions
+
+On top of the standard actions, it is possible to defined custom actions:
+
+```elixir
+entity :post do
+  ...
+  action(:publish, using: MyBlog.Post.Publish, desc: "Publish a post") 
+  ...
+end
+```
+
+It is also possible to further customize inputs (`args`) and outputs (`:produces`) in custom actions:
+
+```elixir
+entity :post do
+  ...
+  action(:publish, using: MyBlog.Post.Publish, args: [:id], :produces: :post) 
+  ...
+end
+```
+
+
+It is essential to provide the implementation for your custom action as a simple Graphism hook.
+
+
+### Hooks
+
+Hooks are a mechanism in Graphism for customization. They are implemented as standard OTP behaviours.
+
+Graphism supports the following types of hooks:
+
+* `Graphism.Hooks.Simple` are suitable as `:using` hooks in custom actions.
+* `Graphism.Hooks.Update` are suitable as `:before` hooks on standard `:update` actions. 
+* `Graphism.Hooks.Allow` are suitable as `:allow` hooks in both standard or custom actions.
+
+Please see the module documentations for further details.
 
 ## Github Workflow :dna:
 Our commit convention follows [conventionalcommits.org](https://www.conventionalcommits.org) workflow.
