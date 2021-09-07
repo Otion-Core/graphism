@@ -959,14 +959,22 @@ defmodule Graphism.Migrations do
   defp table_name(n) when is_binary(n), do: String.to_atom(n)
   defp table_name(n) when is_atom(n), do: n
 
+  defp column_type_from_migration_type(:utc_datetime), do: :datetime
+  defp column_type_from_migration_type(other), do: other
+
+  defp migration_type_from_column_type(:datetime), do: :utc_datetime
+  defp migration_type_from_column_type(other), do: other
+
   defp table_change(table, action, opts, columns) do
     columns =
       columns
       |> Enum.map(&column_change(&1))
       |> Enum.reject(fn col -> col[:column] == nil end)
       |> Enum.reduce(%{}, fn col, map ->
+        type = column_type_from_migration_type(col[:type])
+
         Map.put(map, col[:column], %{
-          type: col[:type],
+          type: type,
           opts: col[:opts],
           action: col[:action]
         })
@@ -999,7 +1007,11 @@ defmodule Graphism.Migrations do
     |> Map.put(:type, type)
   end
 
-  defp type_change(col, type) when is_atom(type), do: Map.put(col, :type, type)
+  defp type_change(col, type) when is_atom(type) do
+    type = column_type_from_migration_type(type)
+
+    Map.put(col, :type, type)
+  end
 
   defp index_change(table, action, columns, opts) do
     %{index: opts[:name], action: action, kind: :index, table: table, columns: columns}
@@ -1269,6 +1281,8 @@ defmodule Graphism.Migrations do
   # included in a migration, inside a create/alter table block
   defp column_change_ast(%{column: name, type: type, opts: opts, action: action, kind: :column})
        when action in [:add, :modify] do
+    type = migration_type_from_column_type(type)
+
     case opts do
       [] ->
         {action, [], [name, type]}

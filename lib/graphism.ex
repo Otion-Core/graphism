@@ -420,6 +420,12 @@ defmodule Graphism do
   defmacro boolean(_name, _opts \\ []) do
   end
 
+  defmacro datetime(_name, _opts \\ []) do
+  end
+
+  defmacro decimal(_name, _opts \\ []) do
+  end
+
   defp without_nils(enum) do
     Enum.reject(enum, fn item -> item == nil end)
   end
@@ -670,6 +676,9 @@ defmodule Graphism do
   defp default_value(v) when is_atom(v), do: "#{v}"
   defp default_value(v), do: v
 
+  defp ecto_datatype(:datetime), do: :utc_datetime
+  defp ecto_datatype(other), do: other
+
   defp schema_module(e, schema, _opts) do
     quote do
       defmodule unquote(e[:schema_module]) do
@@ -699,17 +708,19 @@ defmodule Graphism do
             e[:attributes]
             |> Enum.reject(fn attr -> attr[:name] == :id end)
             |> Enum.map(fn attr ->
+              kind = ecto_datatype(attr[:kind])
+
               case attr[:opts][:default] do
                 nil ->
                   quote do
-                    Ecto.Schema.field(unquote(attr[:name]), unquote(attr[:kind]))
+                    Ecto.Schema.field(unquote(attr[:name]), unquote(kind))
                   end
 
                 default ->
                   default = default_value(default)
 
                   quote do
-                    Ecto.Schema.field(unquote(attr[:name]), unquote(attr[:kind]), default: unquote(default))
+                    Ecto.Schema.field(unquote(attr[:name]), unquote(kind), default: unquote(default))
                   end
               end
             end)
@@ -2326,7 +2337,7 @@ defmodule Graphism do
     @timestamp_fields
     |> Enum.map(fn field ->
       quote do
-        field(unquote(field), non_null(:naive_datetime))
+        field(unquote(field), non_null(:datetime))
       end
     end)
   end
@@ -2825,6 +2836,8 @@ defmodule Graphism do
   defp attribute({:integer, _, [name]}), do: attribute([name, :integer])
   defp attribute({:boolean, _, [name]}), do: attribute([name, :boolean])
   defp attribute({:float, _, [name]}), do: attribute([name, :float])
+  defp attribute({:datetime, _, [name]}), do: attribute([name, :datetime])
+  defp attribute({:decimal, _, [name]}), do: attribute([name, :decimal])
 
   defp attribute({kind, _, [attr, opts]}) do
     with attr when attr != nil <- attribute({kind, nil, [attr]}) do
