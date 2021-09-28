@@ -706,6 +706,7 @@ defmodule Graphism do
         )
 
         @primary_key {:id, :binary_id, autogenerate: false}
+        @timestamps_opts [type: :utc_datetime]
 
         schema unquote("#{e[:plural]}") do
           unquote_splicing(
@@ -1152,6 +1153,16 @@ defmodule Graphism do
     |> without_nils()
   end
 
+  # Returns true if the resolver associated to the action
+  # will have the entity passed as an argument. This happens if we are
+  # updating, reading or deleting the entity. But also when the action
+  # is a custom one, and it has :id as an argument (in this case,
+  # the :id argument will be looked-up and replaced by the entity)
+  defp action_with_entity_as_argument?(action, opts) do
+    Enum.member?([:update, :read, :delete], action) ||
+      (action != :create and has_id_arg?(opts))
+  end
+
   defp resolver_auth_fun(action, opts, e, schema) do
     mod = opts[:allow]
 
@@ -1161,13 +1172,10 @@ defmodule Graphism do
 
     fun_name = String.to_atom("should_#{action}?")
 
-    # case action == :create || action == :update || action == :delete || action == :read do
     ancestors_context =
       case Enum.member?([:create, :update, :read, :delete], action) || has_id_arg?(opts) do
         true ->
-          context_var_from_entity =
-            Enum.member?([:update, :read, :delete], action) ||
-              has_id_arg?(opts)
+          context_var_from_entity = action_with_entity_as_argument?(action, opts)
 
           parent_relations(e)
           |> Enum.flat_map(
