@@ -252,3 +252,25 @@ Graphism supports the following types of hooks:
 * `Graphism.Hooks.Allow` are suitable as `:allow` hooks in both standard or custom actions.
 
 Please see the module documentations for further details.
+
+### Scopes
+
+Graphism provides with the `scope` construct as a convenience in order to implement access control using hooks. A scope
+is defined by its name, an optional description, an `allow` hook and a `filter` hook. Eg:
+
+```elixir
+scope :blog, "Restrict access to posts within a blog" do
+  allow post, context do
+    data.blog.id == context.blog.id
+  end
+
+  filter posts, context do
+    from(p in posts,
+      where: p.blog_id == ^context.blog.id
+    )
+  end
+end
+```
+
+In the above example, the `allow` clause will defined whether a given query or mutation on a post is allowed. 
+The `filter` clause will make sure we only return posts that belong to the blog we currently have in the our context.
