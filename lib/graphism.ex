@@ -995,9 +995,13 @@ defmodule Graphism do
     end)
   end
 
-  defp simple_auth_context() do
+  defp simple_auth_context(e, action) do
     quote do
-      context = Map.drop(context, [:__absinthe_plug__, :loader, :pubsub])
+      context =
+        context
+          |> Map.drop([:__absinthe_plug__, :loader, :pubsub])
+          |> Map.put(:__entity, unquote(e[:name]))
+          |> Map.put(:__action, unquote(action))
     end
   end
 
@@ -1022,7 +1026,7 @@ defmodule Graphism do
 
     quote do
       defp should_list?(args, context) do
-        (unquote_splicing([simple_auth_context(), auth_mod_invocation(mod)]))
+        (unquote_splicing([simple_auth_context(e, :list), auth_mod_invocation(mod)]))
       end
     end
   end
@@ -1043,7 +1047,7 @@ defmodule Graphism do
         quote do
           defp unquote(fun_name)(unquote(var(rel)) = args, context) do
             (unquote_splicing([
-               simple_auth_context(),
+               simple_auth_context(e, :list),
                auth_mod_invocation(mod)
              ]))
           end
@@ -1203,7 +1207,7 @@ defmodule Graphism do
           ) do
         (unquote_splicing(
            [
-             simple_auth_context(),
+             simple_auth_context(e, action),
              entity_context,
              ancestors_context,
              auth_mod_invocation(mod)
