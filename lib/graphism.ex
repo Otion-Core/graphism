@@ -145,7 +145,7 @@ defmodule Graphism do
             end)
           )
 
-          def for_name(kind, name), do: raise "No #{kind} hook with name #{inspect(name)} has been defined"
+          def for_name(kind, name), do: raise("No #{kind} hook with name #{inspect(name)} has been defined")
         end
       end
 
@@ -391,7 +391,7 @@ defmodule Graphism do
   end
 
   defp hook!(hooks, kind, name) do
-    case Enum.find(hooks, & &1.kind == kind and &1.name == name) do
+    case Enum.find(hooks, &(&1.kind == kind and &1.name == name)) do
       nil -> raise "No such hook #{inspect(name)} of kind #{inspect(kind)}"
       hook -> hook.module
     end
@@ -1042,9 +1042,9 @@ defmodule Graphism do
     quote do
       context =
         context
-          |> Map.drop([:__absinthe_plug__, :loader, :pubsub])
-          |> Map.put(:__entity, unquote(e[:name]))
-          |> Map.put(:__action, unquote(action))
+        |> Map.drop([:__absinthe_plug__, :loader, :pubsub])
+        |> Map.put(:__entity, unquote(e[:name]))
+        |> Map.put(:__action, unquote(action))
     end
   end
 
@@ -1954,10 +1954,12 @@ defmodule Graphism do
   defp with_api_read_funs(funs, e, schema_module, repo_module, schema) do
     get_by_id_fun =
       quote do
-        def get_by_id(id) do
+        def get_by_id(id, opts \\ []) do
+          more_preloads = opts[:preload] || []
+
           case unquote(schema_module)
                |> unquote(repo_module).get(id)
-               |> unquote(repo_module).preload(unquote(entity_read_preloads(e, schema))) do
+               |> unquote(repo_module).preload(unquote(entity_read_preloads(e, schema)) ++ more_preloads) do
             nil ->
               {:error, :not_found}
 
@@ -1969,8 +1971,8 @@ defmodule Graphism do
 
     get_by_id_bang_fun =
       quote do
-        def get_by_id!(id) do
-          case get_by_id(id) do
+        def get_by_id!(id, opts \\ []) do
+          case get_by_id(id, opts) do
             {:ok, e} ->
               e
 
@@ -1997,7 +1999,7 @@ defmodule Graphism do
             ]
 
         quote do
-          def unquote(String.to_atom("get_by_#{attr[:name]}"))(unquote_splicing(args)) do
+          def unquote(String.to_atom("get_by_#{attr[:name]}"))(unquote_splicing(args), opts \\ []) do
             value =
               case is_atom(unquote(var(attr))) do
                 true ->
@@ -2025,9 +2027,11 @@ defmodule Graphism do
               )
             ]
 
+            more_preloads = opts[:preload] || []
+
             case unquote(schema_module)
                  |> unquote(repo_module).get_by(filters)
-                 |> unquote(repo_module).preload(unquote(entity_read_preloads(e, schema))) do
+                 |> unquote(repo_module).preload(unquote(entity_read_preloads(e, schema)) ++ more_preloads) do
               nil ->
                 {:error, :not_found}
 
