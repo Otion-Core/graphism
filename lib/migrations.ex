@@ -356,7 +356,14 @@ defmodule Graphism.Migrations do
              columns_migration =
                Enum.map(columns_to_add, fn col ->
                  column = schema_migration[table][:columns][col]
-                 %{column: col, type: column[:type], opts: column[:opts], action: :add, kind: :column}
+
+                 %{
+                   column: col,
+                   type: column[:type],
+                   opts: column[:opts],
+                   action: :add,
+                   kind: :column
+                 }
                end)
 
              entity = entity_from_table_name!(table, schema)
@@ -477,9 +484,13 @@ defmodule Graphism.Migrations do
        |> without_nils())
   end
 
+  defp cast?(_from, to), do: to != :string
+
   defp with_column_type_change(col, existing, schema) do
     if existing[:type] != schema[:type] do
-      Map.put(col, :type, schema[:type])
+      col
+      |> Map.put(:type, schema[:type])
+      |> Map.put(:cast, cast?(existing[:type], schema[:type]))
     else
       col
     end
@@ -567,7 +578,13 @@ defmodule Graphism.Migrations do
   end
 
   defp index_migration(index, action) do
-    %{index: index[:name], action: action, kind: :index, table: index[:table], columns: index[:columns]}
+    %{
+      index: index[:name],
+      action: action,
+      kind: :index,
+      table: index[:table],
+      columns: index[:columns]
+    }
   end
 
   defp drop_table_migration(name) do
@@ -599,7 +616,14 @@ defmodule Graphism.Migrations do
             %{column: col, action: :remove, kind: :column}
           end) ++
           Enum.map(columns[:to_modify] || [], fn col ->
-            %{column: col[:column], type: col[:type], opts: col[:opts], action: :modify, kind: :column}
+            %{
+              column: col[:column],
+              type: col[:type],
+              opts: col[:opts],
+              action: :modify,
+              kind: :column,
+              cast: col[:cast]
+            }
           end)
     }
   end
@@ -948,6 +972,15 @@ defmodule Graphism.Migrations do
     |> enum_change(:drop, nil)
   end
 
+  defp parse_up(
+         {:execute, _,
+          [
+            "alter table " <> _
+          ]}
+       ) do
+    []
+  end
+
   defp parse_up(other) do
     Logger.warn(
       "Unable to parse migration code #{inspect(other)}: #{other |> Macro.to_string() |> Code.format_string!()}"
@@ -1059,6 +1092,7 @@ defmodule Graphism.Migrations do
       migration
       |> sort_migrations()
       |> Enum.map(&quote_migration(&1))
+      |> List.flatten()
 
     code =
       module_name
@@ -1216,13 +1250,22 @@ defmodule Graphism.Migrations do
   end
 
   defp quote_migration(%{table: table, action: :alter, kind: :table, columns: cols}) do
-    {:alter, [line: 1],
-     [
-       {:table, [line: 1], [table]},
+    alter_table =
+      {:alter, [line: 1],
        [
-         do: {:__block__, [], Enum.map(cols, &column_change_ast(&1))}
-       ]
-     ]}
+         {:table, [line: 1], [table]},
+         [
+           do: {:__block__, [], Enum.map(cols, &column_change_ast(&1))}
+         ]
+       ]}
+
+    case Enum.filter(cols, &(&1[:action] == :modify and &1[:cast])) do
+      [] ->
+        alter_table
+
+      cols ->
+        Enum.map(cols, &column_alias_ast(table, &1)) ++ [alter_table]
+    end
   end
 
   defp quote_migration(%{table: table, action: :drop, kind: :table}) do
@@ -1245,7 +1288,13 @@ defmodule Graphism.Migrations do
      ]}
   end
 
-  defp quote_migration(%{index: index, action: :drop, kind: :index, table: table, columns: columns}) do
+  defp quote_migration(%{
+         index: index,
+         action: :drop,
+         kind: :index,
+         table: table,
+         columns: columns
+       }) do
     {:drop_if_exists, [line: 1],
      [
        {:index, [line: 1], [table, columns, [name: index]]}
@@ -1277,8 +1326,13 @@ defmodule Graphism.Migrations do
      ]}
   end
 
-  # Given a column change, generate the AST that will be
-  # included in a migration, inside a create/alter table block
+  defp column_alias_ast(table, col) do
+    {:execute, [line: 1],
+     [
+       "alter table #{table} alter #{col[:column]} type #{col[:type]} using #{col[:column]}::#{col[:type]}"
+     ]}
+  end
+
   defp column_change_ast(%{column: name, type: type, opts: opts, action: action, kind: :column})
        when action in [:add, :modify] do
     type = migration_type_from_column_type(type)
@@ -1295,6 +1349,7 @@ defmodule Graphism.Migrations do
 
           target_table ->
             nullable = opts[:null] || false
+
             {action, [], [name, {:references, [], [target_table, [type: :uuid]]}, [null: nullable]]}
         end
     end

@@ -110,7 +110,7 @@ defmodule Graphism do
       __CALLER__.module
       |> Module.get_attribute(:data)
 
-    _scopes =
+    scopes =
       __CALLER__.module
       |> Module.get_attribute(:scopes)
 
@@ -133,21 +133,6 @@ defmodule Graphism do
         end
       """
     end
-
-    hooks_module =
-      quote do
-        defmodule Hook do
-          unquote_splicing(
-            Enum.map(hooks, fn hook ->
-              quote do
-                def for(unquote(hook.kind), unquote(hook.name)), do: unquote(hook.module)
-              end
-            end)
-          )
-
-          def for_name(kind, name), do: raise("No #{kind} hook with name #{inspect(name)} has been defined")
-        end
-      end
 
     schema_settings =
       quote do
@@ -204,6 +189,32 @@ defmodule Graphism do
         def enums() do
           unquote(enums)
         end
+      end
+
+    scopes_fun =
+      quote do
+        def scopes() do
+          unquote(
+            scopes
+            |> Enum.map(fn scope ->
+              %{name: scope.name, desc: scope.opts[:desc]}
+            end)
+            |> Macro.escape()
+          )
+        end
+      end
+
+    scope_fun =
+      quote do
+        unquote_splicing(
+          Enum.map(scopes, fn scope ->
+            quote do
+              def scope!(unquote(scope.name)), do: unquote(scope.module)
+            end
+          end)
+        )
+
+        def scope!(name), do: raise("No such scope #{name}")
       end
 
     schema_fun =
@@ -363,6 +374,8 @@ defmodule Graphism do
       schema_settings,
       enums_fun,
       schema_fun,
+      scopes_fun,
+      scope_fun,
       schema_empty_modules,
       schema_modules,
       api_modules,
@@ -375,13 +388,18 @@ defmodule Graphism do
       queries,
       entities_mutations,
       mutations,
-      metrics,
-      hooks_module
+      metrics
     ])
   end
 
   defmacro allow({:__aliases__, _, module}) do
-    hook = %{kind: :allow, name: :default, desc: "Default hook for authorization", module: Module.concat(module)}
+    hook = %{
+      kind: :allow,
+      name: :default,
+      desc: "Default hook for authorization",
+      module: Module.concat(module)
+    }
+
     Module.put_attribute(__CALLER__.module, :hooks, hook)
   end
 
@@ -397,25 +415,8 @@ defmodule Graphism do
     end
   end
 
-  defmacro scope(name, desc \\ nil, do: block) do
-    scope =
-      name
-      |> as_scope(desc)
-      |> scope_with(block, :allow)
-      |> scope_with(block, :filter)
-
-    Module.put_attribute(__CALLER__.module, :scopes, scope)
-  end
-
-  defmacro allow(_data, _context, _block), do: :ok
-  defmacro filter(_query, _context, _block), do: :ok
-
-  defp as_scope(name, desc) do
-    %{kind: :scope, name: name, desc: desc}
-  end
-
-  defp scope_with(scope, {:__block__, [], clauses}, clause) do
-    Map.put(scope, clause, Enum.filter(clauses, fn {name, _, _impl} -> name == clause end))
+  defmacro scope(name, {:__aliases__, _, module}, opts \\ []) do
+    Module.put_attribute(__CALLER__.module, :scopes, %{name: name, module: Module.concat(module), opts: opts})
   end
 
   defmacro entity(name, opts \\ [], do: block) do
@@ -1033,7 +1034,7 @@ defmodule Graphism do
     |> Enum.flat_map(fn {_, opts} ->
       [
         resolver_list_all_auth_fun(e, opts, schema, hooks),
-        resolver_list_by_parent_auth_funs(e, opts, schema)
+        resolver_list_by_parent_auth_funs(e, opts, schema, hooks)
       ]
     end)
   end
@@ -1060,12 +1061,18 @@ defmodule Graphism do
     end
   end
 
-  defp resolver_list_all_auth_fun(e, opts, _schema, hooks) do
+  defp allow_hook!(e, opts, action, hooks) do
     mod = opts[:allow] || hook!(hooks, :allow, :default)
 
     unless mod do
-      raise "missing :allow option in entity #{e[:name]} for action :list, and no default :allow hook has been defined in the schema"
+      raise "missing :allow option in entity #{e[:name]} for action :#{action}, and no default :allow hook has been defined in the schema"
     end
+
+    mod
+  end
+
+  defp resolver_list_all_auth_fun(e, opts, _schema, hooks) do
+    mod = allow_hook!(e, opts, :list, hooks)
 
     quote do
       defp should_list?(args, context) do
@@ -1074,12 +1081,8 @@ defmodule Graphism do
     end
   end
 
-  defp resolver_list_by_parent_auth_funs(e, opts, _schema) do
-    mod = opts[:allow]
-
-    unless mod do
-      raise "missing :allow option in entity #{e[:name]} for action :list"
-    end
+  defp resolver_list_by_parent_auth_funs(e, opts, _schema, hooks) do
+    mod = allow_hook!(e, opts, :list, hooks)
 
     e
     |> parent_relations()
@@ -1211,11 +1214,7 @@ defmodule Graphism do
   end
 
   defp resolver_auth_fun(action, opts, e, schema, hooks) do
-    mod = opts[:allow] || hook!(hooks, :allow, :default)
-
-    unless mod do
-      raise "action #{action} of entity #{e[:name]} does not define an :allow option, and now default :allow hook has been defined in the schema"
-    end
+    mod = allow_hook!(e, opts, action, hooks)
 
     fun_name = String.to_atom("should_#{action}?")
 
