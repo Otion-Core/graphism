@@ -477,6 +477,9 @@ defmodule Graphism do
   defmacro optional(_attr, _opts \\ []) do
   end
 
+  defmacro private(_attr, _opts \\ []) do
+  end
+
   defmacro computed(_attr, _opts \\ []) do
   end
 
@@ -933,19 +936,6 @@ defmodule Graphism do
     end
   end
 
-  defp entity_by_id_resolver_fun(e) do
-    quote do
-      def get_by_id(_, args, %{context: context}) do
-        with unquote_splicing([
-               with_entity_fetch(e),
-               with_should_invocation(e, :read)
-             ]) do
-          {:ok, unquote(var(e))}
-        end
-      end
-    end
-  end
-
   defp with_resolver_read_funs(funs, e, _schema, _api_module) do
     with_entity_funs(funs, e, :read, fn ->
       [
@@ -962,6 +952,8 @@ defmodule Graphism do
                     args,
                     %{context: context}
                   ) do
+                unquote(simple_auth_context(e, :read))
+
                 with unquote_splicing([
                        with_entity_fetch(e, attr_name),
                        with_should_invocation(e, :read)
@@ -973,6 +965,21 @@ defmodule Graphism do
           end)
       ]
     end)
+  end
+
+  defp entity_by_id_resolver_fun(e) do
+    quote do
+      def get_by_id(_, args, %{context: context}) do
+        unquote(simple_auth_context(e, :read))
+
+        with unquote_splicing([
+               with_entity_fetch(e),
+               with_should_invocation(e, :read)
+             ]) do
+          {:ok, unquote(var(e))}
+        end
+      end
+    end
   end
 
   defp relation!(e, name) do
@@ -2915,6 +2922,12 @@ defmodule Graphism do
   defp attribute({:computed, _, [opts]}) do
     attr = attribute(opts)
     modifiers = [:computed | get_in(attr, [:opts, :modifiers]) || []]
+    put_in(attr, [:opts, :modifiers], modifiers)
+  end
+
+  defp attribute({:private, _, [opts]}) do
+    attr = attribute(opts)
+    modifiers = [:private | get_in(attr, [:opts, :modifiers]) || []]
     put_in(attr, [:opts, :modifiers], modifiers)
   end
 
