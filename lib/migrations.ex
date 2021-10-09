@@ -285,6 +285,7 @@ defmodule Graphism.Migrations do
     |> without_old_columns(existing, schema_migration)
     |> without_old_tables(existing, schema_migration)
     |> without_old_enums(existing_enums, schema_enums)
+    |> without_old_indices(existing, schema_migration)
     |> with_existing_columns_modified(existing, schema_migration, schema)
     |> with_existing_enums_modified(existing_enums, schema_enums)
   end
@@ -420,6 +421,21 @@ defmodule Graphism.Migrations do
       Enum.map(enums_to_drop, fn enum ->
         drop_enum_migration(enum, existing_enums[enum])
       end)
+  end
+
+  defp table_without_index?(schema, index) do
+    schema[index.table] != nil and
+      schema[index.table].indices[index.name] == nil
+  end
+
+  defp without_old_indices(migrations, existing, schema_migration) do
+    indices_to_drop =
+      existing
+      |> Enum.flat_map(fn {_, schema} -> Map.values(schema.indices) end)
+      |> Enum.filter(&table_without_index?(schema_migration, &1))
+
+    migrations ++
+      Enum.map(indices_to_drop, &drop_index_migration/1)
   end
 
   defp without_old_tables(migrations, existing, schema) do
