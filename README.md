@@ -135,29 +135,6 @@ For convenience, `Plug.Cowboy` is automatically downloaded by Graphism, so you d
 
 ## Observability
 
-By default, Graphism embeds the great PromEx library in order to provide with built-in Prometheus metrics for all of your generated schema queries and mutations, but also for your Ecto repositories. 
-
-For example, if your Graphism schema is `MyBlog.Schema`, then all your need to do is to add the generated 
-module `MyBlog.Schema.Metrics` to the top of your supervision tree.
-
-```elixir
-defmodule MyBlog.Application do
-  def start(_type, _args) do
-    children = [
-      MyBlog.Schema.Metrics,
-      ...
-    ]
-    ...
-  end
-  ...
-```
-
-With this simple configuration, your metrics will be available at "/metrics". If you wished to customize 
-the path, add the `metrics` option to your Graphism.Plug:
-
-```elixir
-use Graphism.Plug, schema: MyBlog.Schema, metrics: "/metrics/blog"
-```
 
 ## Schema Features :abacus:
 

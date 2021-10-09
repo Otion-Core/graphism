@@ -26,11 +26,8 @@ defmodule Graphism.Plug do
 
   defmacro __using__(opts) do
     schema = Keyword.fetch!(opts, :schema)
-    metrics_path = opts[:metrics] || "/metrics"
 
     quote do
-      plug(PromEx.Plug, prom_ex_module: unquote(schema).Metrics, path: unquote(metrics_path))
-
       plug(Plug.Parsers,
         parsers: [:urlencoded, :multipart, :json, Absinthe.Plug.Parser],
         pass: ["*/*"],

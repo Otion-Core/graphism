@@ -31,9 +31,7 @@ defmodule Graphism.MixProject do
       {:libgraph, "~> 0.13.3"},
       {:plug_cowboy, "~> 2.0"},
       {:postgrex, ">= 0.0.0"},
-      {:prom_ex, git: "https://github.com/pedro-gutierrez/prom_ex.git", tag: "1.3.1"},
-      {:recase, "~> 0.5"},
-      {:telemetry, "~> 1.0", override: true}
+      {:recase, "~> 0.5"}
     ]
   end
 end
