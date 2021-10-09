@@ -10,7 +10,7 @@ defmodule Graphism do
   require Logger
 
   defmacro __using__(opts \\ []) do
-    otp_app = Keyword.fetch!(opts, :otp_app)
+    # otp_app = Keyword.fetch!(opts, :otp_app)
     repo = Keyword.fetch!(opts, :repo)
 
     Code.compiler_options(ignore_module_conflict: true)
@@ -40,12 +40,12 @@ defmodule Graphism do
       persist: true
     )
 
-    Module.register_attribute(__CALLER__.module, :otp_app,
-      accumulate: false,
-      persist: true
-    )
+    # Module.register_attribute(__CALLER__.module, :otp_app,
+    #  accumulate: false,
+    #  persist: true
+    # )
 
-    Module.put_attribute(__CALLER__.module, :otp_app, otp_app)
+    # Module.put_attribute(__CALLER__.module, :otp_app, otp_app)
 
     Module.put_attribute(__CALLER__.module, :repo, repo)
 
@@ -400,10 +400,14 @@ defmodule Graphism do
     Module.put_attribute(__CALLER__.module, :hooks, hook)
   end
 
-  defp hook!(hooks, kind, name) do
-    case Enum.find(hooks, &(&1.kind == kind and &1.name == name)) do
-      nil -> raise "No such hook #{inspect(name)} of kind #{inspect(kind)}"
-      hook -> hook.module
+  defmodule AlwaysAllow do
+    def allow?(_, _), do: true
+    def scope(q, _), do: q
+  end
+
+  defp hook(hooks, kind, name) do
+    with hook when hook != nil <- Enum.find(hooks, &(&1.kind == kind and &1.name == name)) do
+      hook.module
     end
   end
 
@@ -1061,20 +1065,20 @@ defmodule Graphism do
   end
 
   defp allow_hook!(e, opts, action, hooks) do
-    mod = opts[:allow] || hook!(hooks, :allow, :default)
+    mod = opts[:allow] || hook(hooks, :allow, :default)
 
     unless mod do
-      raise "missing :allow option in entity #{e[:name]} for action :#{action}, and no default :allow hook has been defined in the schema"
+      raise "missing :allow option in entity #{e[:name]} for action :#{action}, and no default authorization hook has been defined in the schema"
     end
 
     mod
   end
 
   defp scope_hook!(e, opts, action, hooks) do
-    mod = opts[:scope] || hook!(hooks, :allow, :default)
+    mod = opts[:scope] || hook(hooks, :allow, :default)
 
     unless mod do
-      raise "missing :scope option in entity #{e[:name]} for action :#{action}, and no default :allow hook has been defined in the schema"
+      raise "missing :scope option in entity #{e[:name]} for action :#{action}, and no default authorization hook has been defined in the schema"
     end
 
     mod

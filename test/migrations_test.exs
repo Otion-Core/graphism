@@ -2,9 +2,16 @@ defmodule MigrationsTest do
   use ExUnit.Case
   alias Graphism.Migrations
 
+  defmodule AllowEverything do
+    def allow?(_, _), do: true
+    def scope(q, _), do: q
+  end
+
   test "detects when an existing field becomes optional" do
     defmodule MySchema do
       use Graphism, repo: TestRepo
+
+      allow(AllowEverything)
 
       entity :blog do
         optional(string(:tags))
@@ -47,6 +54,8 @@ defmodule MigrationsTest do
   test "adds values to existing enums" do
     defmodule MySchema do
       use Graphism, repo: TestRepo
+
+      allow(AllowEverything)
 
       data(:topics, [:nature, :science])
 
@@ -93,6 +102,8 @@ defmodule MigrationsTest do
     defmodule MySchema do
       use Graphism, repo: TestRepo
 
+      allow(AllowEverything)
+
       entity :blog do
         string(:tags)
         action(:list)
@@ -136,6 +147,8 @@ defmodule MigrationsTest do
     defmodule MySchema do
       use Graphism, repo: TestRepo
 
+      allow(AllowEverything)
+
       entity :blog do
         unique(string(:name))
         action(:list)
@@ -176,6 +189,8 @@ defmodule MigrationsTest do
   test "removes unique constraints from existing columns" do
     defmodule MySchema do
       use Graphism, repo: TestRepo
+
+      allow(AllowEverything)
 
       entity :blog do
         string(:name)
@@ -220,6 +235,8 @@ defmodule MigrationsTest do
     defmodule MySchema do
       use Graphism, repo: TestRepo
 
+      allow(AllowEverything)
+
       entity :blog do
         unique(string(:name))
         action(:list)
@@ -261,6 +278,8 @@ defmodule MigrationsTest do
   test "also drops unique indices when removing columns from existing tables" do
     defmodule MySchema do
       use Graphism, repo: TestRepo
+
+      allow(AllowEverything)
 
       entity :blog do
         action(:list)
