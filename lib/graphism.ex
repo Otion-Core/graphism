@@ -1901,13 +1901,16 @@ defmodule Graphism do
     end
   end
 
-  defp with_api_list_funs(funs, e, schema_module, repo_module, _schema, hooks) do
+  defp with_api_list_funs(funs, e, schema_module, repo_module, schema, hooks) do
+    preloads = entity_read_preloads(e, schema)
+
     [
       quote do
         def list(context \\ %{}) do
           query =
             from(unquote(var(e)) in unquote(schema_module),
-              order_by: [asc: :inserted_at]
+              order_by: [asc: :inserted_at],
+              preload: unquote(preloads)
             )
 
           unquote(
@@ -1932,7 +1935,8 @@ defmodule Graphism do
               query =
                 from(unquote(var(rel)) in unquote(schema_module),
                   where: unquote(var(rel)).unquote(String.to_atom("#{rel[:name]}_id")) == ^id,
-                  order_by: [asc: unquote(var(rel)).inserted_at]
+                  order_by: [asc: unquote(var(rel)).inserted_at],
+                  preload: unquote(preloads)
                 )
 
               unquote(
