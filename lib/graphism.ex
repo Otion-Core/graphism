@@ -20,11 +20,6 @@ defmodule Graphism do
       persist: true
     )
 
-    Module.register_attribute(__CALLER__.module, :scopes,
-      accumulate: true,
-      persist: true
-    )
-
     Module.register_attribute(__CALLER__.module, :hooks,
       accumulate: true,
       persist: true
@@ -105,10 +100,6 @@ defmodule Graphism do
       __CALLER__.module
       |> Module.get_attribute(:data)
 
-    scopes =
-      __CALLER__.module
-      |> Module.get_attribute(:scopes)
-
     hooks =
       __CALLER__.module
       |> Module.get_attribute(:hooks)
@@ -184,32 +175,6 @@ defmodule Graphism do
         def enums() do
           unquote(enums)
         end
-      end
-
-    scopes_fun =
-      quote do
-        def scopes() do
-          unquote(
-            scopes
-            |> Enum.map(fn scope ->
-              %{name: scope.name, desc: scope.opts[:desc]}
-            end)
-            |> Macro.escape()
-          )
-        end
-      end
-
-    scope_fun =
-      quote do
-        unquote_splicing(
-          Enum.map(scopes, fn scope ->
-            quote do
-              def scope!(unquote(scope.name)), do: unquote(scope.module)
-            end
-          end)
-        )
-
-        def scope!(name), do: raise("No such scope #{name}")
       end
 
     schema_fun =
@@ -367,8 +332,6 @@ defmodule Graphism do
       schema_settings,
       enums_fun,
       schema_fun,
-      scopes_fun,
-      scope_fun,
       schema_empty_modules,
       schema_modules,
       api_modules,
@@ -395,24 +358,15 @@ defmodule Graphism do
     Module.put_attribute(__CALLER__.module, :hooks, hook)
   end
 
-  defmacro hook(name, kind, desc, {:__aliases__, _, module}) do
-    hook = %{kind: kind, name: name, desc: desc, module: Module.concat(module)}
-    Module.put_attribute(__CALLER__.module, :hooks, hook)
-  end
-
-  defmodule AlwaysAllow do
-    def allow?(_, _), do: true
-    def scope(q, _), do: q
-  end
+  # defmacro hook(name, kind, desc, {:__aliases__, _, module}) do
+  #   hook = %{kind: kind, name: name, desc: desc, module: Module.concat(module)}
+  #   Module.put_attribute(__CALLER__.module, :hooks, hook)
+  # end
 
   defp hook(hooks, kind, name) do
     with hook when hook != nil <- Enum.find(hooks, &(&1.kind == kind and &1.name == name)) do
       hook.module
     end
-  end
-
-  defmacro scope(name, {:__aliases__, _, module}, opts \\ []) do
-    Module.put_attribute(__CALLER__.module, :scopes, %{name: name, module: Module.concat(module), opts: opts})
   end
 
   defmacro entity(name, opts \\ [], do: block) do
