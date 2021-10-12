@@ -80,8 +80,8 @@ defmodule Graphism do
         [Absinthe.Middleware.Dataloader] ++ Absinthe.Plugin.defaults()
       end
 
-      def middleware(middleware, _field, object) do
-        middleware ++ [Graphism.ErrorMiddleware, @fields_auth]
+      def middleware(middleware, _field, _object) do
+        middleware ++ [@fields_auth, Graphism.ErrorMiddleware]
       end
     end
   end
@@ -108,6 +108,8 @@ defmodule Graphism do
       data
       |> Enum.filter(fn {_, values} -> is_list(values) end)
 
+    default_allow_hook = hook(hooks, :allow, :default)
+
     unless length(schema) > 0 do
       raise """
         Your Graphism schema is empty. Please define at least
@@ -123,6 +125,7 @@ defmodule Graphism do
     schema_settings =
       quote do
         defmodule FieldsAuth do
+          @behaviour Absinthe.Middleware
           alias Absinthe.Blueprint.Document.Field
 
           def call(
@@ -133,32 +136,34 @@ defmodule Graphism do
                   }
                 } = resolution,
                 _
-              ) do
-            auth(entity, field, resolution)
-          end
+              ),
+              do: auth(entity, field, resolution)
 
           def call(resolution, _), do: resolution
 
           unquote_splicing(
             Enum.flat_map(schema, fn e ->
               (e[:attributes] ++ e[:relations])
-              |> Enum.filter(fn attr -> attr[:opts][:allow] end)
               |> Enum.map(fn field ->
-                # TODO: use default allow hook here instead
-                mod = field[:opts][:allow]
+                entity_name = e[:name]
+                field_name = field[:name]
+                mod = field[:opts][:allow] || default_allow_hook
 
                 quote do
-                  defp auth(unquote(e[:name]), unquote(field[:name]), resolution) do
+                  defp auth(unquote(entity_name), unquote(field_name), resolution) do
                     context =
                       resolution.context
                       |> Map.drop([:pubsub, :loader, :__absinthe_plug__])
+                      |> Map.put(:graphism, %{entity: unquote(entity_name), field: unquote(field_name)})
+                      |> Map.put(unquote(entity_name), resolution.source)
+                      |> Map.put(unquote(field_name), resolution.value)
 
                     case unquote(mod).allow?(resolution.value, context) do
                       true ->
                         resolution
 
                       false ->
-                        %{resolution | value: nil}
+                        Absinthe.Resolution.put_result(resolution, {:error, :unauthorized})
                     end
                   end
                 end
@@ -357,11 +362,6 @@ defmodule Graphism do
 
     Module.put_attribute(__CALLER__.module, :hooks, hook)
   end
-
-  # defmacro hook(name, kind, desc, {:__aliases__, _, module}) do
-  #   hook = %{kind: kind, name: name, desc: desc, module: Module.concat(module)}
-  #   Module.put_attribute(__CALLER__.module, :hooks, hook)
-  # end
 
   defp hook(hooks, kind, name) do
     with hook when hook != nil <- Enum.find(hooks, &(&1.kind == kind and &1.name == name)) do
@@ -1001,8 +1001,7 @@ defmodule Graphism do
       context =
         context
         |> Map.drop([:__absinthe_plug__, :loader, :pubsub])
-        |> Map.put(:__entity, unquote(e[:name]))
-        |> Map.put(:__action, unquote(action))
+        |> Map.put(:graphism, %{entity: unquote(e[:name]), action: unquote(action)})
     end
   end
 
