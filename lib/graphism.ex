@@ -35,13 +35,6 @@ defmodule Graphism do
       persist: true
     )
 
-    # Module.register_attribute(__CALLER__.module, :otp_app,
-    #  accumulate: false,
-    #  persist: true
-    # )
-
-    # Module.put_attribute(__CALLER__.module, :otp_app, otp_app)
-
     Module.put_attribute(__CALLER__.module, :repo, repo)
 
     alias Dataloader, as: DL
@@ -1823,24 +1816,47 @@ defmodule Graphism do
   end
 
   defp api_module(e, schema, hooks, opts) do
-    schema_module = e[:schema_module]
-    repo_module = opts[:repo]
+    case virtual?(e) do
+      false ->
+        schema_module = e[:schema_module]
+        repo_module = opts[:repo]
 
-    api_funs =
-      []
-      |> with_api_list_funs(e, schema_module, repo_module, schema, hooks)
-      |> with_api_read_funs(e, schema_module, repo_module, schema)
-      |> with_api_create_fun(e, schema_module, repo_module, schema)
-      |> with_api_update_fun(e, schema_module, repo_module, schema)
-      |> with_api_delete_fun(e, schema_module, repo_module, schema)
-      |> with_api_custom_funs(e, schema_module, repo_module, schema)
-      |> List.flatten()
+        api_funs =
+          []
+          |> with_api_list_funs(e, schema_module, repo_module, schema, hooks)
+          |> with_api_read_funs(e, schema_module, repo_module, schema)
+          |> with_api_create_fun(e, schema_module, repo_module, schema)
+          |> with_api_update_fun(e, schema_module, repo_module, schema)
+          |> with_api_delete_fun(e, schema_module, repo_module, schema)
+          |> with_api_custom_funs(e)
+          |> List.flatten()
 
-    quote do
-      defmodule unquote(e[:api_module]) do
-        import Ecto.Query, only: [from: 2]
-        (unquote_splicing(api_funs))
-      end
+        quote do
+          defmodule unquote(e[:api_module]) do
+            import Ecto.Query, only: [from: 2]
+            (unquote_splicing(api_funs))
+          end
+        end
+
+      true ->
+        actions = e[:actions]
+        custom_actions = e[:custom_actions]
+
+        e =
+          e
+          |> Keyword.put(:custom_actions, Keyword.merge(custom_actions, actions))
+          |> Keyword.put(:actions, [])
+
+        api_funs =
+          []
+          |> with_api_custom_funs(e)
+          |> List.flatten()
+
+        quote do
+          defmodule unquote(e[:api_module]) do
+            (unquote_splicing(api_funs))
+          end
+        end
     end
   end
 
@@ -2218,13 +2234,13 @@ defmodule Graphism do
     ]
   end
 
-  defp with_api_custom_funs(funs, e, schema_module, repo_module, _schema) do
+  defp with_api_custom_funs(funs, e) do
     Enum.map(e[:custom_actions], fn {action, opts} ->
-      api_custom_fun(e, action, opts, schema_module, repo_module)
+      api_custom_fun(e, action, opts)
     end) ++ funs
   end
 
-  defp api_custom_fun(e, action, opts, _schema_module, _repo_module) do
+  defp api_custom_fun(e, action, opts) do
     using_mod = opts[:using]
 
     unless using_mod do
@@ -2842,7 +2858,7 @@ defmodule Graphism do
     end
   end
 
-  defp attributes_from({:__block__, [], attrs}) do
+  defp attributes_from({:__block__, _, attrs}) do
     attrs
     |> Enum.map(&attribute/1)
     |> without_nils()
@@ -2908,7 +2924,7 @@ defmodule Graphism do
     end
   end
 
-  defp relations_from({:__block__, [], attrs}) do
+  defp relations_from({:__block__, _, attrs}) do
     attrs
     |> Enum.map(fn
       {:has_many, _, [name]} ->
@@ -2968,7 +2984,7 @@ defmodule Graphism do
     end
   end
 
-  defp actions_from({:__block__, [], actions}, entity_name) do
+  defp actions_from({:__block__, _, actions}, entity_name) do
     actions
     |> Enum.reduce([], fn action, acc ->
       case action_from(action, entity_name) do
