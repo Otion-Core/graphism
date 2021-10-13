@@ -2382,12 +2382,23 @@ defmodule Graphism do
           end
 
         _ ->
-          quote do
-            field(
-              unquote(rel[:name]),
-              unquote(kind),
-              resolve: dataloader(unquote(opts[:caller]).Dataloader.Repo)
-            )
+          case virtual?(e) do
+            false ->
+              quote do
+                field(
+                  unquote(rel[:name]),
+                  unquote(kind),
+                  resolve: dataloader(unquote(opts[:caller]).Dataloader.Repo)
+                )
+              end
+
+            true ->
+              quote do
+                field(
+                  unquote(rel[:name]),
+                  unquote(kind)
+                )
+              end
           end
       end
     end)
