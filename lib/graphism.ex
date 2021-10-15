@@ -1469,14 +1469,23 @@ defmodule Graphism do
     Enum.map(rels, fn rel ->
       case computed?(rel) do
         true ->
-          mod = rel[:opts][:using]
+          cond do
+            rel[:opts][:using] != nil ->
+              mod = rel[:opts][:using]
 
-          unless mod do
-            raise "relation #{rel[:name]} of #{e[:name]} is computed but does not specify a :using option"
-          end
+              quote do
+                {:ok, unquote(var(rel))} <- unquote(mod).execute(context)
+              end
 
-          quote do
-            {:ok, unquote(var(rel))} = unquote(mod).execute(context)
+            rel[:opts][:from] != nil ->
+              from = rel[:opts][:from]
+
+              quote do
+                unquote(var(rel)) <- unquote(var(from)).unquote(rel[:name])
+              end
+
+            true ->
+              raise "relation #{rel[:name]} of #{e[:name]} is computed but does not specify a :using or a :from option"
           end
 
         false ->
