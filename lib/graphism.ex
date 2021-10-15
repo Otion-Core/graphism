@@ -371,6 +371,7 @@ defmodule Graphism do
 
     rels = relations_from(block)
     actions = actions_from(block, name)
+    keys = keys_from(block)
 
     {actions, custom_actions} = split_actions(actions)
 
@@ -379,6 +380,7 @@ defmodule Graphism do
         name: name,
         attributes: attrs,
         relations: rels,
+        keys: keys,
         enums: [],
         opts: opts,
         actions: actions,
@@ -405,6 +407,9 @@ defmodule Graphism do
   end
 
   defmacro belongs_to(_name, _opts \\ []) do
+  end
+
+  defmacro key(_opts \\ []) do
   end
 
   defmacro action(_name, _opts \\ []) do
@@ -882,35 +887,12 @@ defmodule Graphism do
   defp with_resolver_read_funs(funs, e, _schema, _api_module) do
     with_entity_funs(funs, e, :read, fn ->
       [
-        entity_by_id_resolver_fun(e)
-        | e[:attributes]
-          |> Enum.filter(&unique?(&1))
-          |> Enum.map(fn attr ->
-            attr_name = attr[:name]
-            fun_name = String.to_atom("get_by_#{attr[:name]}")
-
-            quote do
-              def unquote(fun_name)(
-                    _,
-                    args,
-                    %{context: context}
-                  ) do
-                unquote(simple_auth_context(e, :read))
-
-                with unquote_splicing([
-                       with_entity_fetch(e, attr_name),
-                       with_should_invocation(e, :read)
-                     ]) do
-                  {:ok, unquote(var(e))}
-                end
-              end
-            end
-          end)
-      ]
+        get_by_id_resolver_fun(e)
+      ] ++ get_by_key_resolver_funs(e) ++ get_by_attribute_resolver_funs(e)
     end)
   end
 
-  defp entity_by_id_resolver_fun(e) do
+  defp get_by_id_resolver_fun(e) do
     quote do
       def get_by_id(_, args, %{context: context}) do
         unquote(simple_auth_context(e, :read))
@@ -923,6 +905,64 @@ defmodule Graphism do
         end
       end
     end
+  end
+
+  defp get_by_key_resolver_funs(e) do
+    e[:keys]
+    |> Enum.map(fn key ->
+      fun_name = String.to_atom("get_by_#{key[:name]}_key")
+
+      args =
+        Enum.map(key[:fields], fn name ->
+          quote do
+            args.unquote(var(name))
+          end
+        end)
+
+      api_call =
+        quote do
+          {:ok, unquote(var(e))} <- unquote(e[:api_module]).unquote(fun_name)(unquote_splicing(args))
+        end
+
+      quote do
+        def unquote(fun_name)(_, args, %{context: context}) do
+          unquote(simple_auth_context(e, :list))
+
+          with unquote_splicing([
+                 api_call,
+                 with_should_invocation(e, :read)
+               ]) do
+            {:ok, unquote(var(e))}
+          end
+        end
+      end
+    end)
+  end
+
+  defp get_by_attribute_resolver_funs(e) do
+    e[:attributes]
+    |> Enum.filter(&unique?(&1))
+    |> Enum.map(fn attr ->
+      attr_name = attr[:name]
+      fun_name = String.to_atom("get_by_#{attr[:name]}")
+
+      quote do
+        def unquote(fun_name)(
+              _,
+              args,
+              %{context: context}
+            ) do
+          unquote(simple_auth_context(e, :read))
+
+          with unquote_splicing([
+                 with_entity_fetch(e, attr_name),
+                 with_should_invocation(e, :read)
+               ]) do
+            {:ok, unquote(var(e))}
+          end
+        end
+      end
+    end)
   end
 
   defp relation!(e, name) do
@@ -1333,42 +1373,48 @@ defmodule Graphism do
      |> without_nils) ++ funs
   end
 
-  defp with_resolver_list_funs(funs, e, schema, api_module) do
-    with_entity_funs(funs, e, :list, fn ->
-      [
-        quote do
-          def list(_, args, %{context: context}) do
-            unquote(simple_auth_context(e, :list))
+  defp resolver_list_fun(e, _schema, api_module) do
+    quote do
+      def list(_, args, %{context: context}) do
+        unquote(simple_auth_context(e, :list))
 
-            with true <- should_list?(args, context) do
-              {:ok, unquote(api_module).list(context)}
-            end
+        with true <- should_list?(args, context) do
+          {:ok, unquote(api_module).list(context)}
+        end
+      end
+    end
+  end
+
+  defp resolver_list_by_relation_funs(e, schema, api_module) do
+    e
+    |> parent_relations()
+    |> Enum.map(fn rel ->
+      target = find_entity!(schema, rel[:target])
+      fun_name = String.to_atom("list_by_#{rel[:name]}")
+      auth_fun_name = String.to_atom("should_list_by_#{rel[:name]}?")
+
+      quote do
+        def unquote(fun_name)(_, args, %{context: context}) do
+          unquote(simple_auth_context(e, :list))
+
+          with {:ok, unquote(var(rel))} <-
+                 unquote(target[:api_module]).get_by_id(args.unquote(rel[:name])),
+               true <- unquote(auth_fun_name)(unquote(var(rel)), context) do
+            {:ok,
+             unquote(api_module).unquote(fun_name)(
+               unquote(var(rel)).id,
+               context
+             )}
           end
         end
-        | e
-          |> parent_relations()
-          |> Enum.map(fn rel ->
-            target = find_entity!(schema, rel[:target])
-            fun_name = String.to_atom("list_by_#{rel[:name]}")
-            auth_fun_name = String.to_atom("should_list_by_#{rel[:name]}?")
+      end
+    end)
+  end
 
-            quote do
-              def unquote(fun_name)(_, args, %{context: context}) do
-                unquote(simple_auth_context(e, :list))
-
-                with {:ok, unquote(var(rel))} <-
-                       unquote(target[:api_module]).get_by_id(args.unquote(rel[:name])),
-                     true <- unquote(auth_fun_name)(unquote(var(rel)), context) do
-                  {:ok,
-                   unquote(api_module).unquote(fun_name)(
-                     unquote(var(rel)).id,
-                     context
-                   )}
-                end
-              end
-            end
-          end)
-      ]
+  defp with_resolver_list_funs(funs, e, schema, api_module) do
+    with_entity_funs(funs, e, :list, fn ->
+      [resolver_list_fun(e, schema, api_module)] ++
+        resolver_list_by_relation_funs(e, schema, api_module)
     end)
   end
 
@@ -1954,14 +2000,63 @@ defmodule Graphism do
     end)
   end
 
-  defp with_api_read_funs(funs, e, schema_module, repo_module, schema) do
-    get_by_id_fun =
+  defp get_by_id_api_fun(e, schema_module, repo_module, schema) do
+    quote do
+      def get_by_id(id, opts \\ []) do
+        more_preloads = opts[:preload] || []
+
+        case unquote(schema_module)
+             |> unquote(repo_module).get(id)
+             |> unquote(repo_module).preload(unquote(entity_read_preloads(e, schema)) ++ more_preloads) do
+          nil ->
+            {:error, :not_found}
+
+          e ->
+            {:ok, e}
+        end
+      end
+    end
+  end
+
+  defp get_by_id_bang_api_fun(schema_module) do
+    quote do
+      def get_by_id!(id, opts \\ []) do
+        case get_by_id(id, opts) do
+          {:ok, e} ->
+            e
+
+          {:error, :not_found} ->
+            raise "No row with id #{id} of type #{unquote(schema_module)} was found"
+        end
+      end
+    end
+  end
+
+  defp get_by_key_api_funs(e, schema_module, repo_module, schema) do
+    Enum.map(e[:keys], fn key ->
+      fun_name = String.to_atom("get_by_#{key[:name]}_key")
+
+      args =
+        Enum.map(key[:fields], fn name ->
+          quote do
+            unquote(var(name))
+          end
+        end)
+
+      filters =
+        Enum.map(key[:fields], fn field ->
+          quote do
+            {unquote(field), unquote(var(field))}
+          end
+        end)
+
       quote do
-        def get_by_id(id, opts \\ []) do
+        def unquote(fun_name)(unquote_splicing(args), opts \\ []) do
           more_preloads = opts[:preload] || []
+          filters = [unquote_splicing(filters)]
 
           case unquote(schema_module)
-               |> unquote(repo_module).get(id)
+               |> unquote(repo_module).get_by(filters)
                |> unquote(repo_module).preload(unquote(entity_read_preloads(e, schema)) ++ more_preloads) do
             nil ->
               {:error, :not_found}
@@ -1971,81 +2066,77 @@ defmodule Graphism do
           end
         end
       end
+    end)
+  end
 
-    get_by_id_bang_fun =
+  defp get_by_unique_attrs_api_funs(e, schema_module, repo_module, schema) do
+    e[:attributes]
+    |> Enum.filter(&unique?(&1))
+    |> Enum.map(fn attr ->
+      scope_args =
+        (e[:opts][:scope] || [])
+        |> Enum.map(fn rel ->
+          var(rel)
+        end)
+
+      args =
+        scope_args ++
+          [
+            var(attr)
+          ]
+
       quote do
-        def get_by_id!(id, opts \\ []) do
-          case get_by_id(id, opts) do
-            {:ok, e} ->
-              e
+        def unquote(String.to_atom("get_by_#{attr[:name]}"))(unquote_splicing(args), opts \\ []) do
+          value =
+            case is_atom(unquote(var(attr))) do
+              true ->
+                "#{unquote(var(attr))}"
 
-            {:error, :not_found} ->
-              raise "No row with id #{id} of type #{unquote(schema_module)} was found"
+              false ->
+                unquote(var(attr))
+            end
+
+          filters = [
+            unquote_splicing(
+              ((e[:opts][:scope] || [])
+               |> Enum.map(fn arg ->
+                 column_name = String.to_atom("#{arg}_id")
+
+                 quote do
+                   {unquote(column_name), unquote(var(arg))}
+                 end
+               end)) ++
+                [
+                  quote do
+                    {unquote(attr[:name]), value}
+                  end
+                ]
+            )
+          ]
+
+          more_preloads = opts[:preload] || []
+
+          case unquote(schema_module)
+               |> unquote(repo_module).get_by(filters)
+               |> unquote(repo_module).preload(unquote(entity_read_preloads(e, schema)) ++ more_preloads) do
+            nil ->
+              {:error, :not_found}
+
+            e ->
+              {:ok, e}
           end
         end
       end
+    end)
+  end
 
-    get_by_unique_attrs_funs =
-      e[:attributes]
-      |> Enum.filter(&unique?(&1))
-      |> Enum.map(fn attr ->
-        scope_args =
-          (e[:opts][:scope] || [])
-          |> Enum.map(fn rel ->
-            var(rel)
-          end)
-
-        args =
-          scope_args ++
-            [
-              var(attr)
-            ]
-
-        quote do
-          def unquote(String.to_atom("get_by_#{attr[:name]}"))(unquote_splicing(args), opts \\ []) do
-            value =
-              case is_atom(unquote(var(attr))) do
-                true ->
-                  "#{unquote(var(attr))}"
-
-                false ->
-                  unquote(var(attr))
-              end
-
-            filters = [
-              unquote_splicing(
-                ((e[:opts][:scope] || [])
-                 |> Enum.map(fn arg ->
-                   column_name = String.to_atom("#{arg}_id")
-
-                   quote do
-                     {unquote(column_name), unquote(var(arg))}
-                   end
-                 end)) ++
-                  [
-                    quote do
-                      {unquote(attr[:name]), value}
-                    end
-                  ]
-              )
-            ]
-
-            more_preloads = opts[:preload] || []
-
-            case unquote(schema_module)
-                 |> unquote(repo_module).get_by(filters)
-                 |> unquote(repo_module).preload(unquote(entity_read_preloads(e, schema)) ++ more_preloads) do
-              nil ->
-                {:error, :not_found}
-
-              e ->
-                {:ok, e}
-            end
-          end
-        end
-      end)
-
-    [get_by_id_fun, get_by_id_bang_fun] ++ get_by_unique_attrs_funs ++ funs
+  defp with_api_read_funs(funs, e, schema_module, repo_module, schema) do
+    [
+      get_by_id_api_fun(e, schema_module, repo_module, schema),
+      get_by_id_bang_api_fun(schema_module)
+    ] ++
+      get_by_key_api_funs(e, schema_module, repo_module, schema) ++
+      get_by_unique_attrs_api_funs(e, schema_module, repo_module, schema) ++ funs
   end
 
   defp hook_call(e, mod, :before, :update) do
@@ -2493,7 +2584,8 @@ defmodule Graphism do
             (unquote_splicing(
                List.flatten([
                  graphql_query_find_by_id(e, schema),
-                 graphql_query_find_by_unique_fields(e, schema)
+                 graphql_query_find_by_unique_fields(e, schema),
+                 graphql_query_find_by_keys(e, schema)
                ])
              ))
           end
@@ -2578,6 +2670,39 @@ defmodule Graphism do
           unquote_splicing(args)
 
           resolve(&(unquote(e[:resolver_module]).unquote(String.to_atom("get_by_#{attr[:name]}")) / 3))
+        end
+      end
+    end)
+  end
+
+  defp graphql_query_find_by_keys(e, _schema) do
+    e[:keys]
+    |> Enum.map(fn key ->
+      description = "Find a single #{e[:display_name]} given its #{key[:name]} key"
+      resolver_fun = String.to_atom("get_by_#{key[:name]}_key")
+
+      args =
+        Enum.map(key[:fields], fn name ->
+          case entity_attribute_or_relation(e, name) do
+            {:attribute, attr} ->
+              kind = attr_graphql_type(attr)
+
+              quote do
+                arg(unquote(name), non_null(unquote(kind)))
+              end
+
+            {:relation, _} ->
+              quote do
+                arg(unquote(name), non_nul(:id))
+              end
+          end
+        end)
+
+      quote do
+        @desc unquote(description)
+        field :by, non_null(unquote(e[:name])) do
+          unquote_splicing(args)
+          resolve(&(unquote(e[:resolver_module]).unquote(resolver_fun) / 3))
         end
       end
     end)
@@ -2842,6 +2967,28 @@ defmodule Graphism do
     end)
   end
 
+  defp entity_relation(e, name) do
+    Enum.find(e[:relations], fn attr ->
+      name == attr[:name]
+    end)
+  end
+
+  defp entity_attribute_or_relation(e, name) do
+    case entity_attribute(e, name) do
+      nil ->
+        case entity_relation(e, name) do
+          nil ->
+            raise "No entity or relation #{name} in entity #{e[:name]}"
+
+          rel ->
+            {:relation, rel}
+        end
+
+      attr ->
+        {:attribute, attr}
+    end
+  end
+
   defp graphql_custom_mutation(e, action, opts, _schema) do
     args = opts[:args]
     produces = opts[:produces]
@@ -2935,6 +3082,19 @@ defmodule Graphism do
   end
 
   defp attribute(_), do: nil
+
+  defp keys_from({:__block__, _, items}) do
+    items
+    |> Enum.filter(&match?({:key, _, _}, &1))
+    |> Enum.map(&key_from/1)
+    |> without_nils()
+  end
+
+  defp key_from({:key, _, [opts]}) do
+    [name: :natural, fields: opts]
+  end
+
+  defp key_from(_), do: nil
 
   defp maybe_add_id_attribute(attrs) do
     if attrs |> Enum.filter(fn attr -> attr[:name] == :id end) |> Enum.empty?() do
