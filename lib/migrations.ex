@@ -159,6 +159,7 @@ defmodule Graphism.Migrations do
     |> column_opts_with_null(attr)
     |> column_opts_with_default(attr)
     |> column_opts_with_unique(attr)
+    |> column_opts_with_stored_type(attr)
   end
 
   defp column_opts_with_primary_key(opts, attr) do
@@ -210,6 +211,13 @@ defmodule Graphism.Migrations do
 
   defp column_opts_with_unique(opts, attr) do
     Keyword.put(opts, :unique, unique?(attr))
+  end
+
+  defp column_opts_with_stored_type(opts, attr) do
+    case attr[:opts][:store] do
+      nil -> opts
+      stored_type -> Keyword.put(opts, :store, stored_type)
+    end
   end
 
   defp column_type_from_attribute(attr) do
@@ -365,6 +373,10 @@ defmodule Graphism.Migrations do
       end)
   end
 
+  defp column_stored_type(column) do
+    column[:opts][:store] || column[:type]
+  end
+
   defp with_new_columns(migrations, existing_migration, schema_migration, _schema) do
     tables_to_merge = Map.keys(schema_migration) -- Map.keys(schema_migration) -- Map.keys(existing_migration)
 
@@ -385,7 +397,7 @@ defmodule Graphism.Migrations do
 
                  %{
                    column: col,
-                   type: column[:type],
+                   type: column_stored_type(col),
                    opts: column[:opts],
                    action: :add,
                    kind: :column
@@ -492,10 +504,12 @@ defmodule Graphism.Migrations do
   defp cast?(_from, to), do: to != :string
 
   defp with_column_type_change(col, existing, schema) do
-    if existing[:type] != schema[:type] do
+    stored_type = column_stored_type(schema)
+
+    if existing[:type] != stored_type do
       col
-      |> Map.put(:type, schema[:type])
-      |> Map.put(:cast, cast?(existing[:type], schema[:type]))
+      |> Map.put(:type, stored_type)
+      |> Map.put(:cast, cast?(existing[:type], stored_type))
     else
       col
     end

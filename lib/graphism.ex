@@ -147,7 +147,10 @@ defmodule Graphism do
                     context =
                       resolution.context
                       |> Map.drop([:pubsub, :loader, :__absinthe_plug__])
-                      |> Map.put(:graphism, %{entity: unquote(entity_name), field: unquote(field_name)})
+                      |> Map.put(:graphism, %{
+                        entity: unquote(entity_name),
+                        field: unquote(field_name)
+                      })
                       |> Map.put(unquote(entity_name), resolution.source)
                       |> Map.put(unquote(field_name), resolution.value)
 
@@ -921,7 +924,8 @@ defmodule Graphism do
 
       api_call =
         quote do
-          {:ok, unquote(var(e))} <- unquote(e[:api_module]).unquote(fun_name)(unquote_splicing(args))
+          {:ok, unquote(var(e))} <-
+            unquote(e[:api_module]).unquote(fun_name)(unquote_splicing(args))
         end
 
       quote do
