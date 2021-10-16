@@ -2222,7 +2222,7 @@ defmodule Graphism do
         {:ok, unquote(var(e))} <-
           %unquote(schema_module){}
           |> unquote(schema_module).changeset(attrs)
-          |> unquote(repo_module).insert()
+          |> unquote(repo_module).insert(opts)
       end
 
     refetch =
@@ -2241,7 +2241,8 @@ defmodule Graphism do
                 |> parent_relations()
                 |> vars()
               ),
-              attrs
+              attrs,
+              opts \\ []
             ) do
           unquote(repo_module).transaction(fn ->
             with unquote_splicing(

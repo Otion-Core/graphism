@@ -105,12 +105,9 @@ defmodule Graphism.Migrations do
         })
       end)
 
-    # Inspect attributes and derive unique indices
     indices =
-      e[:attributes]
-      |> Enum.filter(&unique?(&1))
-      |> Enum.reduce(%{}, fn attr, acc ->
-        index = index_from_attribute(attr, e)
+      (indices_from_attributes(e) ++ indices_from_keys(e))
+      |> Enum.reduce(%{}, fn index, acc ->
         Map.put(acc, index[:name], index)
       end)
 
@@ -118,6 +115,16 @@ defmodule Graphism.Migrations do
       columns: m,
       indices: indices
     })
+  end
+
+  defp indices_from_attributes(e) do
+    e[:attributes]
+    |> Enum.filter(&unique?(&1))
+    |> Enum.map(&index_from_attribute(&1, e))
+  end
+
+  defp indices_from_keys(e) do
+    Enum.map(e[:keys], &index_from_key(&1, e))
   end
 
   # Resolve an entity by name. This function raises an error
@@ -262,11 +269,13 @@ defmodule Graphism.Migrations do
     end
   end
 
+  defp index_from_key(key, e), do: index_for(e, key[:fields])
+
   defp index_for(e, columns) do
     table = e[:table]
     column_names = Enum.join(columns, "_")
     index_name = String.to_atom("unique_#{column_names}_in_#{table}")
-    [table: table, name: index_name, columns: columns]
+    %{table: table, name: index_name, columns: columns}
   end
 
   defp missing_migrations(existing, schema, enums) do
@@ -278,13 +287,14 @@ defmodule Graphism.Migrations do
     existing = Map.drop(existing, [:__enums])
 
     empty_migration()
-    |> with_new_enums(existing_enums, schema_enums)
-    |> with_new_tables(existing, schema_migration)
-    |> with_new_indices(existing, schema_migration)
-    |> with_new_columns(existing, schema_migration, schema)
+    |> without_old_indices(existing, schema_migration)
     |> without_old_columns(existing, schema_migration)
     |> without_old_tables(existing, schema_migration)
     |> without_old_enums(existing_enums, schema_enums)
+    |> with_new_enums(existing_enums, schema_enums)
+    |> with_new_tables(existing, schema_migration)
+    |> with_new_columns(existing, schema_migration, schema)
+    |> with_new_indices(existing, schema_migration)
     |> without_old_indices(existing, schema_migration)
     |> with_existing_columns_modified(existing, schema_migration, schema)
     |> with_existing_enums_modified(existing_enums, schema_enums)
@@ -332,15 +342,30 @@ defmodule Graphism.Migrations do
   end
 
   defp with_new_indices(migrations, existing, schema) do
-    tables_to_create = Map.keys(schema) -- Map.keys(existing)
+    existing_indices = existing |> Enum.flat_map(fn {_, spec} -> spec.indices end) |> Enum.into(%{})
+    schema_indices = schema |> Enum.flat_map(fn {_, spec} -> spec.indices end) |> Enum.into(%{})
+    new_indices = Map.keys(schema_indices) -- Map.keys(existing_indices)
 
     migrations ++
-      Enum.flat_map(tables_to_create, fn table ->
-        create_indices_migrations(table, schema)
+      Enum.map(new_indices, fn name ->
+        index = schema_indices[name]
+        create_index_migration(index)
       end)
   end
 
-  defp with_new_columns(migrations, existing_migration, schema_migration, schema) do
+  defp without_old_indices(migrations, existing, schema) do
+    existing_indices = existing |> Enum.flat_map(fn {_, spec} -> spec.indices end) |> Enum.into(%{})
+    schema_indices = schema |> Enum.flat_map(fn {_, spec} -> spec.indices end) |> Enum.into(%{})
+    old_indices = Map.keys(existing_indices) -- Map.keys(schema_indices)
+
+    migrations ++
+      Enum.map(old_indices, fn name ->
+        index = existing_indices[name]
+        drop_index_migration(index)
+      end)
+  end
+
+  defp with_new_columns(migrations, existing_migration, schema_migration, _schema) do
     tables_to_merge = Map.keys(schema_migration) -- Map.keys(schema_migration) -- Map.keys(existing_migration)
 
     migrations ++
@@ -367,19 +392,7 @@ defmodule Graphism.Migrations do
                  }
                end)
 
-             entity = entity_from_table_name!(table, schema)
-
-             indices_to_create =
-               columns_to_add
-               |> Enum.filter(&schema_migration[table][:columns][&1][:opts][:unique])
-               |> Enum.map(fn col ->
-                 col
-                 |> attribute_from_column_name!(entity)
-                 |> index_from_attribute(entity)
-               end)
-               |> Enum.map(&create_index_migration(&1))
-
-             [alter_table_migration(table, to_add: columns_migration) | indices_to_create]
+             [alter_table_migration(table, to_add: columns_migration)]
          end
        end)
        |> without_nils())
@@ -399,16 +412,7 @@ defmodule Graphism.Migrations do
              []
 
            columns_to_remove ->
-             indices_to_drop =
-               columns_to_remove
-               |> Enum.flat_map(fn col ->
-                 existing_migration[table][:indices]
-                 |> Map.values()
-                 |> Enum.filter(&Enum.member?(&1[:columns], col))
-               end)
-               |> Enum.map(&drop_index_migration(&1))
-
-             indices_to_drop ++ [alter_table_migration(table, to_remove: columns_to_remove)]
+             [alter_table_migration(table, to_remove: columns_to_remove)]
          end
        end)
        |> without_nils())
@@ -421,21 +425,6 @@ defmodule Graphism.Migrations do
       Enum.map(enums_to_drop, fn enum ->
         drop_enum_migration(enum, existing_enums[enum])
       end)
-  end
-
-  defp table_without_index?(schema, index) do
-    schema[index.table] != nil and
-      schema[index.table].indices[index.name] == nil
-  end
-
-  defp without_old_indices(migrations, existing, schema_migration) do
-    indices_to_drop =
-      existing
-      |> Enum.flat_map(fn {_, schema} -> Map.values(schema.indices) end)
-      |> Enum.filter(&table_without_index?(schema_migration, &1))
-
-    migrations ++
-      Enum.map(indices_to_drop, &drop_index_migration/1)
   end
 
   defp without_old_tables(migrations, existing, schema) do
@@ -576,13 +565,6 @@ defmodule Graphism.Migrations do
           migration_from_column(col, spec, :add)
         end)
     }
-  end
-
-  # Add migrations for new indices to be created for the given table
-  defp create_indices_migrations(name, schema) do
-    Enum.reduce(schema[name][:indices], [], fn {_, index}, acc ->
-      [create_index_migration(index) | acc]
-    end)
   end
 
   defp create_index_migration(index) do
