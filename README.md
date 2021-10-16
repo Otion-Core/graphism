@@ -88,7 +88,7 @@ config :graphism, schema: MyBlog.Schema
 Then:
 
 ```
-$ mix graphism.gen.migrations
+$ mix graphism.migrations
 
 ```
 

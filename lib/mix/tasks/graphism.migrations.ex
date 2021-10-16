@@ -1,4 +1,4 @@
-defmodule Mix.Tasks.Graphism.Gen.Migrations do
+defmodule Mix.Tasks.Graphism.Migrations do
   @moduledoc """
   A Mix task that generates all your Ecto migrations
   based on your current Graphism schema
