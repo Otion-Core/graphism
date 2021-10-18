@@ -397,7 +397,7 @@ defmodule Graphism.Migrations do
 
                  %{
                    column: col,
-                   type: column_stored_type(col),
+                   type: column_stored_type(column),
                    opts: column[:opts],
                    action: :add,
                    kind: :column
