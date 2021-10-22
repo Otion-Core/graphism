@@ -1534,6 +1534,13 @@ defmodule Graphism do
                 unquote(var(rel)) <- unquote(var(from)).unquote(rel[:name])
               end
 
+            rel[:opts][:from_context] != nil ->
+              from = rel[:opts][:from_context]
+
+              quote do
+                unquote(var(rel)) <- get_in(context, unquote(from))
+              end
+
             true ->
               raise "relation #{rel[:name]} of #{e[:name]} is computed but does not specify a :using or a :from option"
           end
@@ -3128,10 +3135,31 @@ defmodule Graphism do
         nil
     end)
     |> Enum.reject(fn rel -> rel == nil end)
+    |> Enum.map(&maybe_computed/1)
   end
 
   defp relations_from(_) do
     []
+  end
+
+  defp maybe_computed(field) do
+    from_opt = get_in(field, [:opts, :from]) || get_in(field, [:opts, :from_context])
+
+    case from_opt do
+      nil ->
+        field
+
+      _ ->
+        modifiers = get_in(field, [:opts, :modifiers]) || []
+
+        case Enum.member?(modifiers, :computed) do
+          true ->
+            field
+
+          false ->
+            put_in(field, [:opts, :modifiers], [:computed | modifiers])
+        end
+    end
   end
 
   defp with_action_hook(opts, name) do
