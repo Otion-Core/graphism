@@ -41,12 +41,14 @@ defmodule Graphism do
 
     quote do
       defmodule Dataloader.Repo do
+        @queryables unquote(__CALLER__.module).DataloaderQueries
+
         def data do
           DL.Ecto.new(unquote(repo), query: &query/2)
         end
 
-        def query(queryable, _params) do
-          queryable
+        def query(queryable, params) do
+          @queryables.query(queryable, params)
         end
       end
 
@@ -114,6 +116,28 @@ defmodule Graphism do
         end
       """
     end
+
+    dataloader_queries =
+      quote do
+        defmodule DataloaderQueries do
+          import Ecto.Query, only: [from: 2]
+
+          (unquote_splicing(
+             Enum.map(schema, fn e ->
+               schema_module = e[:schema_module]
+               preloads = entity_read_preloads(e, schema)
+
+               quote do
+                 def query(unquote(schema_module) = schema, _) do
+                   from q in schema,
+                     preload: unquote(preloads)
+                 end
+               end
+             end)
+           ))
+        end
+      end
+      |> debug_ast()
 
     schema_settings =
       quote do
@@ -330,6 +354,7 @@ defmodule Graphism do
       end
 
     List.flatten([
+      dataloader_queries,
       schema_settings,
       enums_fun,
       schema_fun,
