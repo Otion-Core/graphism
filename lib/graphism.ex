@@ -137,7 +137,6 @@ defmodule Graphism do
            ))
         end
       end
-      |> debug_ast()
 
     schema_settings =
       quote do
@@ -160,38 +159,55 @@ defmodule Graphism do
 
           unquote_splicing(
             Enum.flat_map(schema, fn e ->
-              (e[:attributes] ++ e[:relations])
-              |> Enum.map(fn field ->
-                entity_name = e[:name]
-                field_name = field[:name]
-                mod = field[:opts][:allow] || default_allow_hook
+              entity_attributes_auth(e, default_allow_hook) ++
+                entity_belongs_to_relations_auth(e, default_allow_hook) ++
+                entity_has_many_relations_auth(e, default_allow_hook)
 
-                quote do
-                  defp auth(unquote(entity_name), unquote(field_name), resolution) do
-                    context =
-                      resolution.context
-                      |> Map.drop([:pubsub, :loader, :__absinthe_plug__])
-                      |> Map.put(:graphism, %{
-                        entity: unquote(entity_name),
-                        field: unquote(field_name)
-                      })
-                      |> Map.put(unquote(entity_name), resolution.source)
-                      |> Map.put(unquote(field_name), resolution.value)
+              # (e[:attributes] ++ e[:relations])
+              # |> Enum.map(fn field ->
+              #  entity_name = e[:name]
+              #  field_name = field[:name]
+              #  mod = field[:opts][:allow] || default_allow_hook
 
-                    case unquote(mod).allow?(resolution.value, context) do
-                      true ->
-                        resolution
+              #  target_entity =
+              #    case relation?(e, field_name) do
+              #      nil -> nil
+              #      rel -> rel[:target]
+              #    end
 
-                      false ->
-                        Absinthe.Resolution.put_result(resolution, {:error, :unauthorized})
-                    end
-                  end
-                end
-              end)
+              #  quote do
+              #    defp auth(unquote(entity_name), unquote(field_name), resolution) do
+              #      graphism =
+              #        %{
+              #          entity: unquote(entity_name),
+              #          field: unquote(field_name)
+              #        }
+              #        |> maybe_with(:target_entity, unquote(target_entity))
+
+              #      context =
+              #        resolution.context
+              #        |> Map.drop([:pubsub, :loader, :__absinthe_plug__])
+              #        |> Map.put(:graphism, graphism)
+              #        |> Map.put(unquote(entity_name), resolution.source)
+              #        |> Map.put(unquote(field_name), resolution.value)
+              #        |> Graphism.Context.from(resolution.value)
+
+              #      case unquote(mod).allow?(resolution.value, context) do
+              #        true ->
+              #          resolution
+
+              #        false ->
+              #          Absinthe.Resolution.put_result(resolution, {:error, :unauthorized})
+              #      end
+              #    end
+              #  end
+              # end)
             end)
           )
 
           defp auth(_, _, resolution), do: resolution
+          defp maybe_with(map, _key, nil), do: map
+          defp maybe_with(map, key, value), do: Map.put(map, key, value)
         end
       end
 
@@ -371,6 +387,115 @@ defmodule Graphism do
       entities_mutations,
       mutations
     ])
+  end
+
+  def entity_attributes_auth(e, default_allow_hook) do
+    Enum.map(e[:attributes], fn attr ->
+      entity_name = e[:name]
+      field_name = attr[:name]
+      mod = attr[:opts][:allow] || default_allow_hook
+
+      quote do
+        defp auth(unquote(entity_name), unquote(field_name), resolution) do
+          graphism = %{
+            entity: unquote(entity_name),
+            field: unquote(field_name)
+          }
+
+          context =
+            resolution.context
+            |> Map.drop([:pubsub, :loader, :__absinthe_plug__])
+            |> Map.put(:graphism, graphism)
+            |> Map.put(unquote(entity_name), resolution.source)
+            |> Map.put(unquote(field_name), resolution.value)
+            |> Graphism.Context.from(resolution.value)
+            |> Graphism.Context.from(resolution.source)
+
+          case unquote(mod).allow?(resolution.value, context) do
+            true ->
+              resolution
+
+            false ->
+              Absinthe.Resolution.put_result(resolution, {:error, :unauthorized})
+          end
+        end
+      end
+    end)
+  end
+
+  def entity_belongs_to_relations_auth(e, default_allow_hook) do
+    e[:relations]
+    |> Enum.filter(fn rel -> rel[:kind] == :belongs_to end)
+    |> Enum.map(fn rel ->
+      entity_name = e[:name]
+      field_name = rel[:name]
+      target_entity = rel[:target]
+      mod = rel[:opts][:allow] || default_allow_hook
+
+      quote do
+        defp auth(unquote(entity_name), unquote(field_name), resolution) do
+          graphism = %{
+            entity: unquote(entity_name),
+            field: unquote(field_name),
+            target_entity: unquote(target_entity)
+          }
+
+          context =
+            resolution.context
+            |> Map.drop([:pubsub, :loader, :__absinthe_plug__])
+            |> Map.put(:graphism, graphism)
+            |> Map.put(unquote(entity_name), resolution.source)
+            |> Map.put(unquote(field_name), resolution.value)
+            |> Graphism.Context.from(resolution.value)
+            |> Graphism.Context.from(resolution.source)
+
+          case unquote(mod).allow?(resolution.value, context) do
+            true ->
+              resolution
+
+            false ->
+              Absinthe.Resolution.put_result(resolution, {:error, :unauthorized})
+          end
+        end
+      end
+    end)
+  end
+
+  def entity_has_many_relations_auth(e, default_allow_hook) do
+    e[:relations]
+    |> Enum.filter(fn rel -> rel[:kind] == :has_many end)
+    |> Enum.map(fn rel ->
+      entity_name = e[:name]
+      field_name = rel[:name]
+      target_entity = rel[:target]
+      mod = rel[:opts][:allow] || default_allow_hook
+
+      quote do
+        defp auth(unquote(entity_name), unquote(field_name), resolution) do
+          graphism = %{
+            entity: unquote(entity_name),
+            field: unquote(field_name),
+            target_entity: unquote(target_entity)
+          }
+
+          context =
+            resolution.context
+            |> Map.drop([:pubsub, :loader, :__absinthe_plug__])
+            |> Map.put(:graphism, graphism)
+            |> Map.put(unquote(entity_name), resolution.source)
+            |> Map.put(unquote(field_name), resolution.value)
+            |> Graphism.Context.from(resolution.source)
+
+          value =
+            Enum.filter(resolution.value, fn value ->
+              context = Graphism.Context.from(context, value)
+              unquote(mod).allow?(value, context)
+            end)
+
+          %{resolution | value: value}
+        end
+      end
+    end)
   end
 
   defmacro allow({:__aliases__, _, module}) do
