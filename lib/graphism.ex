@@ -406,10 +406,8 @@ defmodule Graphism do
             resolution.context
             |> Map.drop([:pubsub, :loader, :__absinthe_plug__])
             |> Map.put(:graphism, graphism)
-            |> Map.put(unquote(entity_name), resolution.source)
-            |> Map.put(unquote(field_name), resolution.value)
-            |> Graphism.Context.from(resolution.value)
-            |> Graphism.Context.from(resolution.source)
+            |> Graphism.Context.from(%{unquote(field_name) => resolution.value})
+            |> Graphism.Context.from(%{unquote(entity_name) => resolution.source})
 
           case unquote(mod).allow?(resolution.value, context) do
             true ->
@@ -444,10 +442,8 @@ defmodule Graphism do
             resolution.context
             |> Map.drop([:pubsub, :loader, :__absinthe_plug__])
             |> Map.put(:graphism, graphism)
-            |> Map.put(unquote(entity_name), resolution.source)
-            |> Map.put(unquote(field_name), resolution.value)
-            |> Graphism.Context.from(resolution.value)
-            |> Graphism.Context.from(resolution.source)
+            |> Graphism.Context.from(%{unquote(field_name) => resolution.value})
+            |> Graphism.Context.from(%{unquote(entity_name) => resolution.source})
 
           case unquote(mod).allow?(resolution.value, context) do
             true ->
@@ -482,13 +478,11 @@ defmodule Graphism do
             resolution.context
             |> Map.drop([:pubsub, :loader, :__absinthe_plug__])
             |> Map.put(:graphism, graphism)
-            |> Map.put(unquote(entity_name), resolution.source)
-            |> Map.put(unquote(field_name), resolution.value)
-            |> Graphism.Context.from(resolution.source)
+            |> Graphism.Context.from(%{unquote(entity_name) => resolution.source})
 
           value =
             Enum.filter(resolution.value, fn value ->
-              context = Graphism.Context.from(context, value)
+              context = Graphism.Context.from(context, %{unquote(field_name) => value})
               unquote(mod).allow?(value, context)
             end)
 
@@ -1253,154 +1247,61 @@ defmodule Graphism do
     end)
   end
 
-  defp ancestor_auth_context(e, schema, context_var) do
-    e
-    |> parent_relations()
-    |> Enum.map(fn rel ->
-      target = find_entity!(schema, rel[:target])
-      parent_context_var = var(target)
-
-      quote do
-        context =
-          case Map.get(context, unquote(target[:name]), nil) do
-            nil ->
-              unquote(parent_context_var) = unquote(context_var).unquote(rel[:name])
-
-              context =
-                Map.put(
-                  context,
-                  unquote(target[:name]),
-                  unquote(parent_context_var)
-                )
-
-              unquote_splicing(ancestor_auth_context(target, schema, parent_context_var))
-
-            _ ->
-              context
-          end
-      end
-    end)
-  end
-
-  defp auth_fun_entities_args(e, action, opts) do
+  defp auth_fun_entities_arg_names(e, action, opts) do
     cond do
       action == :update ->
-        (e |> parent_relations() |> vars()) ++ [var(e)]
+        (e |> parent_relations() |> names()) ++ [e[:name]]
 
       action == :create ->
-        e |> parent_relations() |> vars()
+        e |> parent_relations() |> names()
 
       action == :read || action == :delete || has_id_arg?(opts) ->
-        [var(e)]
+        [e[:name]]
 
       true ->
         []
     end
   end
 
-  defp parent_auth_context(e, rel, schema, opts) do
-    target = find_entity!(schema, rel[:target])
-    context_var = var(rel)
-
-    context_var_from_entity =
-      case opts[:context_var_from_entity] do
-        true ->
-          quote do
-            unquote(context_var) = unquote(var(e)).unquote(rel[:name])
-          end
-
-        false ->
-          nil
-      end
-
-    relation_context =
-      quote do
-        context =
-          Map.put(
-            context,
-            unquote(target[:name]),
-            unquote(context_var)
-          )
-      end
-
-    relation_context_with_ancestors = [
-      relation_context | ancestor_auth_context(target, schema, context_var)
-    ]
-
-    optional_relation_context_with_ancestors =
-      case optional?(rel) do
-        true ->
-          quote do
-            context =
-              case unquote(context_var) do
-                nil ->
-                  context
-
-                _ ->
-                  (unquote_splicing(relation_context_with_ancestors))
-              end
-          end
-
-        false ->
-          relation_context_with_ancestors
-      end
-
-    [
-      context_var_from_entity,
-      optional_relation_context_with_ancestors
-    ]
-    |> flat()
-    |> without_nils()
-  end
-
-  # Returns true if the resolver associated to the action
-  # will have the entity passed as an argument. This happens if we are
-  # updating, reading or deleting the entity. But also when the action
-  # is a custom one, and it has :id as an argument (in this case,
-  # the :id argument will be looked-up and replaced by the entity)
-  defp action_with_entity_as_argument?(action, opts) do
-    Enum.member?([:update, :read, :delete], action) ||
-      (action != :create and has_id_arg?(opts))
-  end
-
-  defp resolver_auth_fun(action, opts, e, schema, hooks) do
+  defp resolver_auth_fun(action, opts, e, _schema, hooks) do
     mod = allow_hook!(e, opts, action, hooks)
 
     fun_name = String.to_atom("should_#{action}?")
 
-    ancestors_context =
-      case Enum.member?([:create, :update, :read, :delete], action) || has_id_arg?(opts) do
-        true ->
-          context_var_from_entity = action_with_entity_as_argument?(action, opts)
+    entities_var_names = auth_fun_entities_arg_names(e, action, opts)
 
-          parent_relations(e)
-          |> Enum.flat_map(&parent_auth_context(e, &1, schema, context_var_from_entity: context_var_from_entity))
+    {empty_data, data_with_args, context_with_data} =
+      case entities_var_names do
+        [] ->
+          {nil, nil, nil}
 
         _ ->
-          false
-      end
-
-    entity_context =
-      case action == :update || action == :delete || action == :read do
-        true ->
-          quote do
-            context = Map.put(context, unquote(e[:name]), unquote(var(e)))
-          end
-
-        false ->
-          nil
+          {
+            quote do
+              data = %{}
+            end,
+            Enum.map(entities_var_names, fn e ->
+              quote do
+                data = Map.put(data, unquote(e), unquote(var(e)))
+              end
+            end),
+            quote do
+              context = Graphism.Context.from(context, data)
+            end
+          }
       end
 
     quote do
       def unquote(fun_name)(
-            unquote_splicing(auth_fun_entities_args(e, action, opts)),
+            unquote_splicing(vars(entities_var_names)),
             args,
             context
           ) do
         (unquote_splicing(
            [
-             entity_context,
-             ancestors_context,
+             empty_data,
+             data_with_args,
+             context_with_data,
              auth_mod_invocation(mod)
            ]
            |> flat()
@@ -1797,7 +1698,7 @@ defmodule Graphism do
     quote do
       true <-
         unquote(fun_name)(
-          unquote_splicing(auth_fun_entities_args(e, action, opts)),
+          unquote_splicing(auth_fun_entities_arg_names(e, action, opts) |> vars()),
           args,
           context
         )
