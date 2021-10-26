@@ -82,21 +82,23 @@ defmodule Graphism do
   end
 
   defmacro __before_compile__(_) do
+    caller_module = __CALLER__.module
+
     schema =
-      __CALLER__.module
+      caller_module
       |> Module.get_attribute(:schema)
       |> resolve()
 
     repo =
-      __CALLER__.module
+      caller_module
       |> Module.get_attribute(:repo)
 
     data =
-      __CALLER__.module
+      caller_module
       |> Module.get_attribute(:data)
 
     hooks =
-      __CALLER__.module
+      caller_module
       |> Module.get_attribute(:hooks)
 
     enums =
@@ -116,6 +118,59 @@ defmodule Graphism do
         end
       """
     end
+
+    context =
+      quote do
+        defmodule ContextBuilder do
+          @ignore_keys [:__struct__, :__cardinality__, :__field__, :__meta__]
+          @default_opts [strip: false, simple_fields: true]
+
+          def from(parent, data), do: from(parent, data, @default_opts)
+
+          def from(parent, data, opts) when is_map(data) do
+            data
+            |> Map.keys()
+            |> Enum.reject(&Enum.member?(@ignore_keys, &1))
+            |> Enum.reduce(parent, fn key, acc ->
+              value = Map.get(data, key)
+
+              case {Map.get(acc, key), is_map(value)} do
+                {nil, true} ->
+                  value = as_map(value)
+                  child = from(%{}, value)
+
+                  value =
+                    case opts[:strip] do
+                      true ->
+                        Map.drop(value, Map.keys(child))
+
+                      false ->
+                        value
+                    end
+
+                  child
+                  |> Map.merge(acc)
+                  |> Map.put(key, value)
+
+                _ ->
+                  acc
+              end
+            end)
+          end
+
+          def from(parent, _, _), do: parent
+
+          defp as_map(data) do
+            case Map.has_key?(data, :__struct__) do
+              true -> Map.from_struct(data)
+              false -> data
+            end
+            |> Map.drop(@ignore_keys)
+          end
+        end
+      end
+
+    context_builder = Module.concat([caller_module, ContextBuilder])
 
     dataloader_queries =
       quote do
@@ -159,49 +214,9 @@ defmodule Graphism do
 
           unquote_splicing(
             Enum.flat_map(schema, fn e ->
-              entity_attributes_auth(e, default_allow_hook) ++
-                entity_belongs_to_relations_auth(e, default_allow_hook) ++
-                entity_has_many_relations_auth(e, default_allow_hook)
-
-              # (e[:attributes] ++ e[:relations])
-              # |> Enum.map(fn field ->
-              #  entity_name = e[:name]
-              #  field_name = field[:name]
-              #  mod = field[:opts][:allow] || default_allow_hook
-
-              #  target_entity =
-              #    case relation?(e, field_name) do
-              #      nil -> nil
-              #      rel -> rel[:target]
-              #    end
-
-              #  quote do
-              #    defp auth(unquote(entity_name), unquote(field_name), resolution) do
-              #      graphism =
-              #        %{
-              #          entity: unquote(entity_name),
-              #          field: unquote(field_name)
-              #        }
-              #        |> maybe_with(:target_entity, unquote(target_entity))
-
-              #      context =
-              #        resolution.context
-              #        |> Map.drop([:pubsub, :loader, :__absinthe_plug__])
-              #        |> Map.put(:graphism, graphism)
-              #        |> Map.put(unquote(entity_name), resolution.source)
-              #        |> Map.put(unquote(field_name), resolution.value)
-              #        |> Graphism.Context.from(resolution.value)
-
-              #      case unquote(mod).allow?(resolution.value, context) do
-              #        true ->
-              #          resolution
-
-              #        false ->
-              #          Absinthe.Resolution.put_result(resolution, {:error, :unauthorized})
-              #      end
-              #    end
-              #  end
-              # end)
+              entity_attributes_auth(e, default_allow_hook, context_builder) ++
+                entity_belongs_to_relations_auth(e, default_allow_hook, context_builder) ++
+                entity_has_many_relations_auth(e, default_allow_hook, context_builder)
             end)
           )
 
@@ -258,7 +273,7 @@ defmodule Graphism do
 
     resolver_modules =
       Enum.map(schema, fn e ->
-        resolver_module(e, schema, repo: repo, hooks: hooks, caller: __CALLER__)
+        resolver_module(e, schema, repo: repo, hooks: hooks, caller: __CALLER__, context_builder: context_builder)
       end)
 
     enum_types =
@@ -370,6 +385,7 @@ defmodule Graphism do
       end
 
     List.flatten([
+      context,
       dataloader_queries,
       schema_settings,
       enums_fun,
@@ -389,7 +405,7 @@ defmodule Graphism do
     ])
   end
 
-  def entity_attributes_auth(e, default_allow_hook) do
+  def entity_attributes_auth(e, default_allow_hook, context_builder) do
     Enum.map(e[:attributes], fn attr ->
       entity_name = e[:name]
       field_name = attr[:name]
@@ -406,8 +422,8 @@ defmodule Graphism do
             resolution.context
             |> Map.drop([:pubsub, :loader, :__absinthe_plug__])
             |> Map.put(:graphism, graphism)
-            |> Graphism.Context.from(%{unquote(field_name) => resolution.value})
-            |> Graphism.Context.from(%{unquote(entity_name) => resolution.source})
+            |> unquote(context_builder).from(%{unquote(field_name) => resolution.value})
+            |> unquote(context_builder).from(%{unquote(entity_name) => resolution.source})
 
           case unquote(mod).allow?(resolution.value, context) do
             true ->
@@ -421,7 +437,7 @@ defmodule Graphism do
     end)
   end
 
-  def entity_belongs_to_relations_auth(e, default_allow_hook) do
+  def entity_belongs_to_relations_auth(e, default_allow_hook, context_builder) do
     e[:relations]
     |> Enum.filter(fn rel -> rel[:kind] == :belongs_to end)
     |> Enum.map(fn rel ->
@@ -442,8 +458,8 @@ defmodule Graphism do
             resolution.context
             |> Map.drop([:pubsub, :loader, :__absinthe_plug__])
             |> Map.put(:graphism, graphism)
-            |> Graphism.Context.from(%{unquote(field_name) => resolution.value})
-            |> Graphism.Context.from(%{unquote(entity_name) => resolution.source})
+            |> unquote(context_builder).from(%{unquote(field_name) => resolution.value})
+            |> unquote(context_builder).from(%{unquote(entity_name) => resolution.source})
 
           case unquote(mod).allow?(resolution.value, context) do
             true ->
@@ -457,7 +473,7 @@ defmodule Graphism do
     end)
   end
 
-  def entity_has_many_relations_auth(e, default_allow_hook) do
+  def entity_has_many_relations_auth(e, default_allow_hook, context_builder) do
     e[:relations]
     |> Enum.filter(fn rel -> rel[:kind] == :has_many end)
     |> Enum.map(fn rel ->
@@ -478,11 +494,11 @@ defmodule Graphism do
             resolution.context
             |> Map.drop([:pubsub, :loader, :__absinthe_plug__])
             |> Map.put(:graphism, graphism)
-            |> Graphism.Context.from(%{unquote(entity_name) => resolution.source})
+            |> unquote(context_builder).from(%{unquote(entity_name) => resolution.source})
 
           value =
             Enum.filter(resolution.value, fn value ->
-              context = Graphism.Context.from(context, %{unquote(field_name) => value})
+              context = unquote(context_builder).from(context, %{unquote(field_name) => value})
               unquote(mod).allow?(value, context)
             end)
 
@@ -1149,12 +1165,12 @@ defmodule Graphism do
     rel
   end
 
-  defp with_resolver_auth_funs(funs, e, schema, hooks) do
+  defp with_resolver_auth_funs(funs, e, schema, hooks, context_builder) do
     action_resolver_auth_funs =
       (e[:actions] ++ e[:custom_actions])
       |> Enum.reject(fn {name, _} -> name == :list end)
       |> Enum.map(fn {name, opts} ->
-        resolver_auth_fun(name, opts, e, schema, hooks)
+        resolver_auth_fun(name, opts, e, schema, hooks, context_builder)
       end)
 
     funs ++
@@ -1263,7 +1279,7 @@ defmodule Graphism do
     end
   end
 
-  defp resolver_auth_fun(action, opts, e, _schema, hooks) do
+  defp resolver_auth_fun(action, opts, e, _schema, hooks, context_builder) do
     mod = allow_hook!(e, opts, action, hooks)
 
     fun_name = String.to_atom("should_#{action}?")
@@ -1286,7 +1302,7 @@ defmodule Graphism do
               end
             end),
             quote do
-              context = Graphism.Context.from(context, data)
+              context = unquote(context_builder).from(context, data)
             end
           }
       end
@@ -1912,10 +1928,11 @@ defmodule Graphism do
   defp resolver_module(e, schema, opts) do
     api_module = e[:api_module]
     hooks = Keyword.fetch!(opts, :hooks)
+    context_builder = Keyword.fetch!(opts, :context_builder)
 
     resolver_funs =
       []
-      |> with_resolver_auth_funs(e, schema, hooks)
+      |> with_resolver_auth_funs(e, schema, hooks, context_builder)
       |> with_resolver_inlined_relations_funs(e, schema, api_module)
       |> with_resolver_list_funs(e, schema, api_module)
       |> with_resolver_read_funs(e, schema, api_module)
