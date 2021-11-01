@@ -173,7 +173,7 @@ defmodule Graphism.Migrations do
   end
 
   defp optional?(attr) do
-    Enum.member?(attr[:opts][:modifiers] || [], :optional)
+    Enum.member?(attr[:opts][:modifiers] || [], :optional) or attr[:opts][:null] == true
   end
 
   defp unique?(attr) do
@@ -210,7 +210,10 @@ defmodule Graphism.Migrations do
   end
 
   defp column_opts_with_unique(opts, attr) do
-    Keyword.put(opts, :unique, unique?(attr))
+    case unique?(attr) do
+      true -> Keyword.put(opts, :unique, true)
+      false -> opts
+    end
   end
 
   defp column_opts_with_stored_type(opts, attr) do
