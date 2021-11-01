@@ -1960,6 +1960,7 @@ defmodule Graphism do
           |> with_api_list_funs(e, schema_module, repo_module, schema, hooks)
           |> with_api_read_funs(e, schema_module, repo_module, schema)
           |> with_api_create_fun(e, schema_module, repo_module, schema)
+          |> with_api_batch_create_fun(e, schema_module, repo_module, schema)
           |> with_api_update_fun(e, schema_module, repo_module, schema)
           |> with_api_delete_fun(e, schema_module, repo_module, schema)
           |> with_api_custom_funs(e)
@@ -2341,6 +2342,20 @@ defmodule Graphism do
                 unquote(repo_module).rollback(e)
             end
           end)
+        end
+      end
+
+    [fun | funs]
+  end
+
+  defp with_api_batch_create_fun(funs, _e, schema_module, repo_module, _schema) do
+    fun =
+      quote do
+        def batch_create(items, opts \\ []) do
+          case unquote(repo_module).insert_all(unquote(schema_module), items, opts) do
+            {count, _} -> {:ok, count}
+            other -> {:error, other}
+          end
         end
       end
 
