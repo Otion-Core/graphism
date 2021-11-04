@@ -7,6 +7,8 @@ defmodule Graphism do
   if it comes from the database, an external API or others.
   """
 
+  alias Graphism.Migrations
+
   require Logger
 
   defmacro __using__(opts \\ []) do
@@ -846,6 +848,8 @@ defmodule Graphism do
   defp ecto_datatype(other), do: other
 
   defp schema_module(e, schema, _opts) do
+    indices = Migrations.indices_from_attributes(e) ++ Migrations.indices_from_keys(e)
+
     quote do
       defmodule unquote(e[:schema_module]) do
         use Ecto.Schema
@@ -970,22 +974,17 @@ defmodule Graphism do
             |> cast(attrs, @all_fields)
             |> validate_required(@required_fields)
             |> unique_constraint(:id, name: unquote("#{e[:table]}_pkey"))
-
+          
           unquote_splicing(
-            e[:attributes]
-            |> Enum.filter(&unique?(&1))
-            |> Enum.map(fn attr ->
-              index_columns =
-                ((e[:opts][:scope] || [])
-                 |> Enum.map(fn rel -> String.to_atom("#{rel}_id") end)) ++ [attr[:name]]
-
+            Enum.map(indices, fn index ->
+              field_name = index.columns |> Enum.join("_") |> String.to_atom()
               quote do
                 changes =
                   changes
                   |> unique_constraint(
-                    unquote(attr[:name]),
-                    name: unquote("unique_#{Enum.join(index_columns, "_")}_in_#{e[:table]}")
-                  )
+                    unquote(field_name),
+                    name: unquote(index.name)
+                    )
               end
             end)
           )
@@ -2485,7 +2484,7 @@ defmodule Graphism do
       kind =
         case attr[:opts][:allow] do
           nil ->
-            case optional?(attr) || opts[:mode] == :update do
+            case (optional?(attr) && !Keyword.has_key?(attr[:opts], :default)) || opts[:mode] == :update do
               true ->
                 quote do
                   unquote(kind)

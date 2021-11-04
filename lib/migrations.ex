@@ -117,13 +117,13 @@ defmodule Graphism.Migrations do
     })
   end
 
-  defp indices_from_attributes(e) do
+  def indices_from_attributes(e) do
     e[:attributes]
     |> Enum.filter(&unique?(&1))
     |> Enum.map(&index_from_attribute(&1, e))
   end
 
-  defp indices_from_keys(e) do
+  def indices_from_keys(e) do
     Enum.map(e[:keys], &index_from_key(&1, e))
   end
 
@@ -137,6 +137,20 @@ defmodule Graphism.Migrations do
     end
 
     e
+  end
+  
+  defp is_relation?(e, field) do
+    Enum.find(e[:relations], fn rel -> rel[:name] == field end) != nil
+  end
+
+  defp column_name_from_field(field, e) do
+    case is_relation?(e, field) do
+      true ->
+        column_name_from_relation(field)
+
+      false ->
+        column_name_from_attribute(field)
+    end
   end
 
   defp column_name_from_relation(name) when is_atom(name) do
@@ -241,29 +255,11 @@ defmodule Graphism.Migrations do
         kind
     end
   end
+  
+  defp column_name_from_attribute(name) when is_atom(name), do: name
 
   defp column_name_from_attribute(attr) do
     attr[:name]
-  end
-
-  defp entity_from_table_name!(table, schema) do
-    e = Enum.find(schema, fn e -> e[:table] == table end)
-
-    unless e do
-      raise "No entity found for table #{table} in #{inspect(schema)}"
-    end
-
-    e
-  end
-
-  defp attribute_from_column_name!(column, e) do
-    attr = Enum.find(e[:attributes], fn attr -> attr[:name] == column end)
-
-    unless attr do
-      raise "No attribute for column #{column} found in #{inspect(e)}"
-    end
-
-    attr
   end
 
   defp index_from_attribute(attr, e) do
@@ -282,11 +278,11 @@ defmodule Graphism.Migrations do
 
   defp index_from_key(key, e), do: index_for(e, key[:fields])
 
-  defp index_for(e, columns) do
+  defp index_for(e, fields) do
     table = e[:table]
-    column_names = Enum.join(columns, "_")
-    index_name = String.to_atom("unique_#{column_names}_in_#{table}")
-    %{table: table, name: index_name, columns: columns}
+    column_names = fields |> Enum.map(&column_name_from_field(&1, e))
+    index_name = String.to_atom("#{table}_#{Enum.join(column_names, "_")}_key")
+    %{table: table, name: index_name, columns: column_names}
   end
 
   defp missing_migrations(existing, schema, enums) do
@@ -306,7 +302,6 @@ defmodule Graphism.Migrations do
     |> with_new_tables(existing, schema_migration)
     |> with_new_columns(existing, schema_migration, schema)
     |> with_new_indices(existing, schema_migration)
-    |> without_old_indices(existing, schema_migration)
     |> with_existing_columns_modified(existing, schema_migration, schema)
     |> with_existing_enums_modified(existing_enums, schema_enums)
   end
@@ -451,7 +446,7 @@ defmodule Graphism.Migrations do
       end)
   end
 
-  defp with_existing_columns_modified(migrations, existing_migration, schema_migration, schema) do
+  defp with_existing_columns_modified(migrations, existing_migration, schema_migration, _schema) do
     tables_to_merge = Map.keys(schema_migration) -- Map.keys(schema_migration) -- Map.keys(existing_migration)
 
     migrations ++
@@ -485,19 +480,7 @@ defmodule Graphism.Migrations do
                    alter_table_migration(table, to_modify: columns_to_modify)
                end
 
-             index_migrations =
-               columns_to_modify
-               |> Enum.filter(&(!schema_migration[table][:columns][&1][:opts][:references]))
-               |> Enum.map(fn col ->
-                 schema_column = schema_migration[table][:columns][col]
-
-                 existing_indices = existing_migration[table][:indices]
-                 entity = entity_from_table_name!(table, schema)
-
-                 column_unique_change(col, existing_indices, schema_column, entity)
-               end)
-
-             [column_migration | index_migrations]
+             [column_migration]
          end
          |> without_nils()
        end)
@@ -528,26 +511,6 @@ defmodule Graphism.Migrations do
 
       _ ->
         col
-    end
-  end
-
-  defp column_unique_change(col, indices, schema_column, entity) do
-    index =
-      col
-      |> attribute_from_column_name!(entity)
-      |> index_from_attribute(entity)
-
-    index_exists? = indices[index[:name]] != nil
-
-    case {schema_column[:opts][:unique] || false, index_exists?} do
-      {false, true} ->
-        drop_index_migration(index)
-
-      {true, false} ->
-        create_index_migration(index)
-
-      _ ->
-        nil
     end
   end
 
