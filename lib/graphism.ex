@@ -2787,7 +2787,7 @@ defmodule Graphism do
 
             {:relation, _} ->
               quote do
-                arg(unquote(name), non_nul(:id))
+                arg(unquote(name), non_null(:id))
               end
           end
         end)
