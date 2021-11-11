@@ -12,7 +12,6 @@ defmodule Graphism do
   require Logger
 
   defmacro __using__(opts \\ []) do
-    # otp_app = Keyword.fetch!(opts, :otp_app)
     repo = Keyword.fetch!(opts, :repo)
 
     Code.compiler_options(ignore_module_conflict: true)
@@ -2509,7 +2508,7 @@ defmodule Graphism do
       kind =
         case attr[:opts][:allow] do
           nil ->
-            case (optional?(attr) && !Keyword.has_key?(attr[:opts], :default)) ||
+            case optional?(attr) || Keyword.has_key?(attr[:opts], :default) ||
                    opts[:mode] == :update do
               true ->
                 quote do

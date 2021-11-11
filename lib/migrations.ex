@@ -138,7 +138,7 @@ defmodule Graphism.Migrations do
 
     e
   end
-  
+
   defp is_relation?(e, field) do
     Enum.find(e[:relations], fn rel -> rel[:name] == field end) != nil
   end
@@ -255,7 +255,7 @@ defmodule Graphism.Migrations do
         kind
     end
   end
-  
+
   defp column_name_from_attribute(name) when is_atom(name), do: name
 
   defp column_name_from_attribute(attr) do
