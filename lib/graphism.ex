@@ -863,6 +863,7 @@ defmodule Graphism do
 
   defp schema_module(e, schema, _opts) do
     indices = Migrations.indices_from_attributes(e) ++ Migrations.indices_from_keys(e)
+    scope_columns = Enum.map(e[:opts][:scope] || [], fn col -> String.to_existing_atom("#{col}_id") end)
 
     quote do
       defmodule unquote(e[:schema_module]) do
@@ -991,7 +992,7 @@ defmodule Graphism do
 
           unquote_splicing(
             Enum.map(indices, fn index ->
-              field_name = index.columns |> Enum.join("_") |> String.to_atom()
+              field_name = (index.columns -- scope_columns) |> Enum.join("_") |> String.to_atom()
 
               quote do
                 changes =
