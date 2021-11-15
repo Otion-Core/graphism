@@ -43,19 +43,8 @@ Assuming you already have an Ecto repo, define a new schema module with your ent
 defmodule MyBlog.Schema do
   use Graphism,
     repo: MyBlog.Repo,
-    otp_app: :my_app
 
     
-  entity :post do
-    string(:body)
-    has_many :comments
-
-    action(:read)
-    action(:list)
-    action(:create)
-    action(:update)
-    action(:delete)
-  end
 
   entity :comment do
     string(:body)
@@ -72,6 +61,62 @@ end
 ```
 
 Graphism will automatically add unique IDs as UUIDs to all entities in your schema.
+
+## Splitting your schema
+
+As your project grows, it might happen that your schema contains more and more entities. It is a good 
+practice to split the main schema by import smaller ones.
+
+The `MyBlog.Schema` can be rewritten as:
+
+```elixir
+defmodule MyBlog.Schema do
+
+  use Graphism, repo: MyBlog.Repo
+  import_schema MyBlog.Post.Schema
+  import_schema MyBlog.Comment.Schema
+end
+```
+
+with:
+
+```elixir
+defmodule MyBlog.Post.Schema do
+  use Graphism
+
+  entity :post do
+    string(:body)
+    has_many :comments
+
+    action(:read)
+    action(:list)
+    action(:create)
+    action(:update)
+    action(:delete)
+  end
+end
+```
+
+and 
+
+```elixir
+defmodule MyBlog.Comment.Schema do
+  use Graphism
+  
+  entity :comment do
+    string(:body)
+    belongs_to :post
+
+    action(:read)
+    action(:list)
+    action(:create)
+    action(:update)
+    action(:delete)
+  end
+end
+```
+
+Any schema (including imported schemas) can contain any number of entities
 
 ## Generate migrations :building_construction:
 
@@ -132,9 +177,6 @@ end
 ```
 
 For convenience, `Plug.Cowboy` is automatically downloaded by Graphism, so you don't need to add it to your project.
-
-## Observability
-
 
 ## Schema Features :abacus:
 

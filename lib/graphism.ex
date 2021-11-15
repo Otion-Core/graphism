@@ -12,8 +12,6 @@ defmodule Graphism do
   require Logger
 
   defmacro __using__(opts \\ []) do
-    repo = Keyword.fetch!(opts, :repo)
-
     Code.compiler_options(ignore_module_conflict: true)
 
     Module.register_attribute(__CALLER__.module, :data,
@@ -31,53 +29,67 @@ defmodule Graphism do
       persist: true
     )
 
-    Module.register_attribute(__CALLER__.module, :repo,
-      accumulate: false,
+    Module.register_attribute(__CALLER__.module, :schema_imports,
+      accumulate: true,
       persist: true
     )
 
-    Module.put_attribute(__CALLER__.module, :repo, repo)
+    repo = opts[:repo]
 
-    alias Dataloader, as: DL
+    if repo != nil do
+      Module.register_attribute(__CALLER__.module, :repo,
+        accumulate: false,
+        persist: true
+      )
 
-    quote do
-      defmodule Dataloader.Repo do
-        @queryables unquote(__CALLER__.module).DataloaderQueries
+      Module.put_attribute(__CALLER__.module, :repo, repo)
 
-        def data do
-          DL.Ecto.new(unquote(repo), query: &query/2)
+      alias Dataloader, as: DL
+
+      quote do
+        defmodule Dataloader.Repo do
+          @queryables unquote(__CALLER__.module).DataloaderQueries
+
+          def data do
+            DL.Ecto.new(unquote(repo), query: &query/2)
+          end
+
+          def query(queryable, params) do
+            @queryables.query(queryable, params)
+          end
         end
 
-        def query(queryable, params) do
-          @queryables.query(queryable, params)
+        import unquote(__MODULE__), only: :macros
+        @before_compile unquote(__MODULE__)
+
+        use Absinthe.Schema
+        import Absinthe.Resolution.Helpers, only: [dataloader: 1]
+        import_types(Absinthe.Type.Custom)
+
+        @sources [unquote(__CALLER__.module).Dataloader.Repo]
+        @fields_auth unquote(__CALLER__.module).FieldsAuth
+
+        def context(ctx) do
+          loader =
+            Enum.reduce(@sources, DL.new(), fn source, loader ->
+              DL.add_source(loader, source, source.data())
+            end)
+
+          Map.put(ctx, :loader, loader)
+        end
+
+        def plugins do
+          [Absinthe.Middleware.Dataloader] ++ Absinthe.Plugin.defaults()
+        end
+
+        def middleware(middleware, _field, _object) do
+          middleware ++ [@fields_auth, Graphism.ErrorMiddleware]
         end
       end
-
-      import unquote(__MODULE__), only: :macros
-      @before_compile unquote(__MODULE__)
-
-      use Absinthe.Schema
-      import Absinthe.Resolution.Helpers, only: [dataloader: 1]
-      import_types(Absinthe.Type.Custom)
-
-      @sources [unquote(__CALLER__.module).Dataloader.Repo]
-      @fields_auth unquote(__CALLER__.module).FieldsAuth
-
-      def context(ctx) do
-        loader =
-          Enum.reduce(@sources, DL.new(), fn source, loader ->
-            DL.add_source(loader, source, source.data())
-          end)
-
-        Map.put(ctx, :loader, loader)
-      end
-
-      def plugins do
-        [Absinthe.Middleware.Dataloader] ++ Absinthe.Plugin.defaults()
-      end
-
-      def middleware(middleware, _field, _object) do
-        middleware ++ [@fields_auth, Graphism.ErrorMiddleware]
+    else
+      quote do
+        import unquote(__MODULE__), only: :macros
+        @before_compile unquote(__MODULE__)
       end
     end
   end
@@ -85,336 +97,371 @@ defmodule Graphism do
   defmacro __before_compile__(_) do
     caller_module = __CALLER__.module
 
-    schema =
-      caller_module
-      |> Module.get_attribute(:schema)
-      |> resolve()
-
     repo =
       caller_module
       |> Module.get_attribute(:repo)
 
-    data =
-      caller_module
-      |> Module.get_attribute(:data)
+    unless repo do
+      []
+    else
+      schema_imports =
+        caller_module
+        |> Module.get_attribute(:schema_imports)
+        |> Enum.flat_map(fn mod ->
+          :attributes
+          |> mod.__info__()
+          |> Enum.filter(fn {name, _} -> name == :schema end)
+          |> Enum.map(fn {_, e} -> e end)
+          |> Enum.map(fn e ->
+            schema_module_alias = e[:schema_module] |> Module.split() |> List.last()
+            schema_module = Module.split(caller_module) ++ [schema_module_alias]
 
-    hooks =
-      caller_module
-      |> Module.get_attribute(:hooks)
-
-    enums =
-      data
-      |> Enum.filter(fn {_, values} -> is_list(values) end)
-
-    default_allow_hook = hook(hooks, :allow, :default)
-
-    unless length(schema) > 0 do
-      raise """
-        Your Graphism schema is empty. Please define at least
-        one entity:
-
-        entity :my_entity do
-          attribute :id, :id
-          attribute :name, :string
-        end
-      """
-    end
-
-    context =
-      quote do
-        defmodule ContextBuilder do
-          @ignore_keys [:__struct__, :__cardinality__, :__field__, :__meta__]
-          @default_opts [strip: false, simple_fields: true]
-
-          def from(parent, data), do: from(parent, data, @default_opts)
-
-          def from(parent, data, opts) when is_map(data) do
-            data
-            |> Map.keys()
-            |> Enum.reject(&Enum.member?(@ignore_keys, &1))
-            |> Enum.reduce(parent, fn key, acc ->
-              value = Map.get(data, key)
-
-              case {Map.get(acc, key), is_map_value(value)} do
-                {nil, true} ->
-                  value = as_map(value)
-                  child = from(%{}, value)
-
-                  value =
-                    case opts[:strip] do
-                      true ->
-                        Map.drop(value, Map.keys(child))
-
-                      false ->
-                        value
-                    end
-
-                  child
-                  |> Map.merge(acc)
-                  |> Map.put(key, value)
-
-                _ ->
-                  acc
-              end
-            end)
-          end
-
-          def from(parent, _, _), do: parent
-
-          defp is_map_value(%{calendar: _, zone_abbr: _}), do: false
-          defp is_map_value(%{__owner__: _}), do: false
-          defp is_map_value(%{}), do: true
-          defp is_map_value(_), do: false
-
-          defp as_map(data) do
-            case Map.has_key?(data, :__struct__) do
-              true -> Map.from_struct(data)
-              false -> data
-            end
-            |> Map.drop(@ignore_keys)
-          end
-        end
-      end
-
-    context_builder = Module.concat([caller_module, ContextBuilder])
-
-    dataloader_queries =
-      quote do
-        defmodule DataloaderQueries do
-          import Ecto.Query, only: [from: 2]
-
-          (unquote_splicing(
-             Enum.map(schema, fn e ->
-               schema_module = e[:schema_module]
-               preloads = parent_preloads(e, schema) ++ child_preloads(e, schema)
-
-               quote do
-                 def query(unquote(schema_module) = schema, _) do
-                   from(q in schema,
-                     preload: unquote(preloads)
-                   )
-                 end
-               end
-             end)
-           ))
-        end
-      end
-
-    schema_settings =
-      quote do
-        defmodule FieldsAuth do
-          @behaviour Absinthe.Middleware
-          alias Absinthe.Blueprint.Document.Field
-
-          def call(
-                %{
-                  definition: %Field{
-                    schema_node: %Absinthe.Type.Field{identifier: field},
-                    parent_type: %Absinthe.Type.Object{identifier: entity}
-                  }
-                } = resolution,
-                _
-              ),
-              do: auth(entity, field, resolution)
-
-          def call(resolution, _), do: resolution
-
-          unquote_splicing(
-            Enum.flat_map(schema, fn e ->
-              entity_attributes_auth(e, default_allow_hook, context_builder) ++
-                entity_belongs_to_relations_auth(e, default_allow_hook, context_builder) ++
-                entity_has_many_relations_auth(e, default_allow_hook, context_builder)
-            end)
-          )
-
-          defp auth(_, _, resolution), do: resolution
-          defp maybe_with(map, _key, nil), do: map
-          defp maybe_with(map, key, value), do: Map.put(map, key, value)
-        end
-      end
-
-    enums_fun =
-      quote do
-        def enums() do
-          unquote(enums)
-        end
-      end
-
-    schema_fun =
-      quote do
-        def schema do
-          unquote(schema)
-        end
-      end
-
-    schema =
-      schema
-      |> Enum.reverse()
-
-    schema
-    |> Enum.each(fn e ->
-      if Enum.empty?(e[:attributes]) and
-           Enum.empty?(e[:relations]) do
-        raise "Entity #{e[:name]} is empty"
-      end
-    end)
-
-    schema_empty_modules =
-      schema
-      |> Enum.reject(&virtual?(&1))
-      |> Enum.map(fn e ->
-        schema_empty_module(e, schema, caller: __CALLER__)
-      end)
-
-    schema_modules =
-      schema
-      |> Enum.reject(&virtual?(&1))
-      |> Enum.map(fn e ->
-        schema_module(e, schema, caller: __CALLER__)
-      end)
-
-    api_modules =
-      Enum.map(schema, fn e ->
-        api_module(e, schema, hooks, repo: repo, caller: __CALLER__)
-      end)
-
-    resolver_modules =
-      Enum.map(schema, fn e ->
-        resolver_module(e, schema,
-          repo: repo,
-          hooks: hooks,
-          caller: __CALLER__,
-          context_builder: context_builder
-        )
-      end)
-
-    enum_types =
-      Enum.map(enums, fn {enum, value} ->
-        graphql_enum(enum, value)
-      end)
-
-    objects = [
-      unit_graphql_object()
-      | Enum.map(schema, fn e ->
-          graphql_object(e, schema, caller: __CALLER__.module)
+            e
+            |> Keyword.put(:schema_module, Module.concat(schema_module))
+            |> Keyword.put(:resolver_module, Module.concat(schema_module ++ [Resolver]))
+            |> Keyword.put(:api_module, Module.concat(schema_module ++ [Api]))
+          end)
         end)
-    ]
 
-    self_resolver =
-      quote do
-        defmodule Resolver.Self do
-          def itself(parent, _, _) do
-            {:ok, parent}
+      schema =
+        caller_module
+        |> Module.get_attribute(:schema)
+        |> Kernel.++(schema_imports)
+        |> resolve()
+
+      data_imports =
+        caller_module
+        |> Module.get_attribute(:schema_imports)
+        |> Enum.flat_map(fn mod ->
+          :attributes
+          |> mod.__info__()
+          |> Enum.filter(fn {name, _} -> name == :data end)
+          |> Enum.flat_map(fn {_, data} -> data end)
+        end)
+
+      data =
+        caller_module
+        |> Module.get_attribute(:data)
+        |> Keyword.merge(data_imports)
+
+      hooks =
+        caller_module
+        |> Module.get_attribute(:hooks)
+
+      enums =
+        data
+        |> Enum.filter(fn {_, values} -> is_list(values) end)
+
+      default_allow_hook = hook(hooks, :allow, :default)
+
+      unless length(schema) > 0 do
+        raise """
+          Your Graphism schema is empty. Please define at least
+          one entity:
+
+          entity :my_entity do
+            attribute :id, :id
+            attribute :name, :string
+          end
+        """
+      end
+
+      context =
+        quote do
+          defmodule ContextBuilder do
+            @ignore_keys [:__struct__, :__cardinality__, :__field__, :__meta__]
+            @default_opts [strip: false, simple_fields: true]
+
+            def from(parent, data), do: from(parent, data, @default_opts)
+
+            def from(parent, data, opts) when is_map(data) do
+              data
+              |> Map.keys()
+              |> Enum.reject(&Enum.member?(@ignore_keys, &1))
+              |> Enum.reduce(parent, fn key, acc ->
+                value = Map.get(data, key)
+
+                case {Map.get(acc, key), is_map_value(value)} do
+                  {nil, true} ->
+                    value = as_map(value)
+                    child = from(%{}, value)
+
+                    value =
+                      case opts[:strip] do
+                        true ->
+                          Map.drop(value, Map.keys(child))
+
+                        false ->
+                          value
+                      end
+
+                    child
+                    |> Map.merge(acc)
+                    |> Map.put(key, value)
+
+                  _ ->
+                    acc
+                end
+              end)
+            end
+
+            def from(parent, _, _), do: parent
+
+            defp is_map_value(%{calendar: _, zone_abbr: _}), do: false
+            defp is_map_value(%{__owner__: _}), do: false
+            defp is_map_value(%{}), do: true
+            defp is_map_value(_), do: false
+
+            defp as_map(data) do
+              case Map.has_key?(data, :__struct__) do
+                true -> Map.from_struct(data)
+                false -> data
+              end
+              |> Map.drop(@ignore_keys)
+            end
           end
         end
-      end
 
-    entities_queries =
-      Enum.flat_map(schema, fn e ->
-        [single_graphql_queries(e, schema), multiple_graphql_queries(e, schema)]
-      end)
-      |> without_nils()
+      context_builder = Module.concat([caller_module, ContextBuilder])
 
-    queries =
-      quote do
-        query do
-          (unquote_splicing(
-             schema
-             |> Enum.reject(&internal?(&1))
-             |> Enum.flat_map(fn e ->
-               [
-                 with_entity_action(e, :list, fn _ ->
-                   quote do
-                     field unquote(String.to_atom("#{e[:plural]}")),
-                           non_null(unquote(String.to_atom("#{e[:plural]}_queries"))) do
-                       resolve(&Resolver.Self.itself/3)
-                     end
+      dataloader_queries =
+        quote do
+          defmodule DataloaderQueries do
+            import Ecto.Query, only: [from: 2]
+
+            (unquote_splicing(
+               Enum.map(schema, fn e ->
+                 schema_module = e[:schema_module]
+                 preloads = parent_preloads(e, schema) ++ child_preloads(e, schema)
+
+                 quote do
+                   def query(unquote(schema_module) = schema, _) do
+                     from(q in schema,
+                       preload: unquote(preloads)
+                     )
                    end
-                 end),
-                 with_entity_action(e, :read, fn _ ->
-                   quote do
-                     field unquote(String.to_atom("#{e[:name]}")),
-                           non_null(unquote(String.to_atom("#{e[:name]}_queries"))) do
-                       resolve(&Resolver.Self.itself/3)
-                     end
-                   end
-                 end)
-               ]
-             end)
-             |> without_nils()
-             |> raise_if_empty(
-               "No GraphQL queries could be extracted from your schema. Please ensure you have :read or :list actions in your entities"
-             )
-           ))
+                 end
+               end)
+             ))
+          end
         end
-      end
 
-    input_types =
-      schema
-      |> Enum.reject(&internal?(&1))
-      |> Enum.flat_map(fn e ->
-        [
-          graphql_input_types(e, schema),
-          graphql_update_input_types(e, schema)
-        ]
-      end)
-      |> without_nils()
+      schema_settings =
+        quote do
+          defmodule FieldsAuth do
+            @behaviour Absinthe.Middleware
+            alias Absinthe.Blueprint.Document.Field
 
-    entities_mutations =
-      schema
-      |> Enum.reject(&internal?(&1))
-      |> Enum.map(fn e ->
-        graphql_mutations(e, schema)
-      end)
-      |> without_nils()
+            def call(
+                  %{
+                    definition: %Field{
+                      schema_node: %Absinthe.Type.Field{identifier: field},
+                      parent_type: %Absinthe.Type.Object{identifier: entity}
+                    }
+                  } = resolution,
+                  _
+                ),
+                do: auth(entity, field, resolution)
 
-    mutations =
-      quote do
-        mutation do
-          (unquote_splicing(
-             schema
-             |> Enum.reject(&internal?(&1))
-             |> Enum.map(fn e ->
-               case mutations?(e) do
-                 true ->
-                   quote do
-                     field unquote(String.to_atom("#{e[:name]}")),
-                           non_null(unquote(String.to_atom("#{e[:name]}_mutations"))) do
-                       resolve(&Resolver.Self.itself/3)
-                     end
-                   end
+            def call(resolution, _), do: resolution
 
-                 false ->
-                   nil
-               end
-             end)
-             |> without_nils()
-             |> raise_if_empty(
-               "No GraphQL mutations could be extracted from your schema. Please ensure you have actions in your entities other than :read and :list."
-             )
-           ))
+            unquote_splicing(
+              Enum.flat_map(schema, fn e ->
+                entity_attributes_auth(e, default_allow_hook, context_builder) ++
+                  entity_belongs_to_relations_auth(e, default_allow_hook, context_builder) ++
+                  entity_has_many_relations_auth(e, default_allow_hook, context_builder)
+              end)
+            )
+
+            defp auth(_, _, resolution), do: resolution
+            defp maybe_with(map, _key, nil), do: map
+            defp maybe_with(map, key, value), do: Map.put(map, key, value)
+          end
         end
-      end
 
-    List.flatten([
-      context,
-      dataloader_queries,
-      schema_settings,
-      enums_fun,
-      schema_fun,
-      schema_empty_modules,
-      schema_modules,
-      api_modules,
-      resolver_modules,
-      enum_types,
-      input_types,
-      objects,
-      self_resolver,
-      entities_queries,
-      queries,
-      entities_mutations,
-      mutations
-    ])
+      enums_fun =
+        quote do
+          def enums() do
+            unquote(enums)
+          end
+        end
+
+      schema_fun =
+        quote do
+          def schema do
+            unquote(schema)
+          end
+        end
+
+      schema =
+        schema
+        |> Enum.reverse()
+
+      schema
+      |> Enum.each(fn e ->
+        if Enum.empty?(e[:attributes]) and
+             Enum.empty?(e[:relations]) do
+          raise "Entity #{e[:name]} is empty"
+        end
+      end)
+
+      schema_empty_modules =
+        schema
+        |> Enum.reject(&virtual?(&1))
+        |> Enum.map(fn e ->
+          schema_empty_module(e, schema, caller: __CALLER__)
+        end)
+
+      schema_modules =
+        schema
+        |> Enum.reject(&virtual?(&1))
+        |> Enum.map(fn e ->
+          schema_module(e, schema, caller: __CALLER__)
+        end)
+
+      api_modules =
+        Enum.map(schema, fn e ->
+          api_module(e, schema, hooks, repo: repo, caller: __CALLER__)
+        end)
+
+      resolver_modules =
+        Enum.map(schema, fn e ->
+          resolver_module(e, schema,
+            repo: repo,
+            hooks: hooks,
+            caller: __CALLER__,
+            context_builder: context_builder
+          )
+        end)
+
+      enum_types =
+        Enum.map(enums, fn {enum, value} ->
+          graphql_enum(enum, value)
+        end)
+
+      objects = [
+        unit_graphql_object()
+        | Enum.map(schema, fn e ->
+            graphql_object(e, schema, caller: __CALLER__.module)
+          end)
+      ]
+
+      self_resolver =
+        quote do
+          defmodule Resolver.Self do
+            def itself(parent, _, _) do
+              {:ok, parent}
+            end
+          end
+        end
+
+      entities_queries =
+        Enum.flat_map(schema, fn e ->
+          [single_graphql_queries(e, schema), multiple_graphql_queries(e, schema)]
+        end)
+        |> without_nils()
+
+      queries =
+        quote do
+          query do
+            (unquote_splicing(
+               schema
+               |> Enum.reject(&internal?(&1))
+               |> Enum.flat_map(fn e ->
+                 [
+                   with_entity_action(e, :list, fn _ ->
+                     quote do
+                       field unquote(String.to_atom("#{e[:plural]}")),
+                             non_null(unquote(String.to_atom("#{e[:plural]}_queries"))) do
+                         resolve(&Resolver.Self.itself/3)
+                       end
+                     end
+                   end),
+                   with_entity_action(e, :read, fn _ ->
+                     quote do
+                       field unquote(String.to_atom("#{e[:name]}")),
+                             non_null(unquote(String.to_atom("#{e[:name]}_queries"))) do
+                         resolve(&Resolver.Self.itself/3)
+                       end
+                     end
+                   end)
+                 ]
+               end)
+               |> without_nils()
+               |> raise_if_empty(
+                 "No GraphQL queries could be extracted from your schema. Please ensure you have :read or :list actions in your entities"
+               )
+             ))
+          end
+        end
+
+      input_types =
+        schema
+        |> Enum.reject(&internal?(&1))
+        |> Enum.flat_map(fn e ->
+          [
+            graphql_input_types(e, schema),
+            graphql_update_input_types(e, schema)
+          ]
+        end)
+        |> without_nils()
+
+      entities_mutations =
+        schema
+        |> Enum.reject(&internal?(&1))
+        |> Enum.map(fn e ->
+          graphql_mutations(e, schema)
+        end)
+        |> without_nils()
+
+      mutations =
+        quote do
+          mutation do
+            (unquote_splicing(
+               schema
+               |> Enum.reject(&internal?(&1))
+               |> Enum.map(fn e ->
+                 case mutations?(e) do
+                   true ->
+                     quote do
+                       field unquote(String.to_atom("#{e[:name]}")),
+                             non_null(unquote(String.to_atom("#{e[:name]}_mutations"))) do
+                         resolve(&Resolver.Self.itself/3)
+                       end
+                     end
+
+                   false ->
+                     nil
+                 end
+               end)
+               |> without_nils()
+               |> raise_if_empty(
+                 "No GraphQL mutations could be extracted from your schema. Please ensure you have actions in your entities other than :read and :list."
+               )
+             ))
+          end
+        end
+
+      List.flatten([
+        context,
+        dataloader_queries,
+        schema_settings,
+        enums_fun,
+        schema_fun,
+        schema_empty_modules,
+        schema_modules,
+        api_modules,
+        resolver_modules,
+        enum_types,
+        input_types,
+        objects,
+        self_resolver,
+        entities_queries,
+        queries,
+        entities_mutations,
+        mutations
+      ])
+    end
   end
 
   def entity_attributes_auth(e, default_allow_hook, context_builder) do
@@ -519,6 +566,10 @@ defmodule Graphism do
         end
       end
     end)
+  end
+
+  defmacro import_schema({:__aliases__, _, module}) do
+    Module.put_attribute(__CALLER__.module, :schema_imports, Module.concat(module))
   end
 
   defmacro allow({:__aliases__, _, module}) do
@@ -813,9 +864,7 @@ defmodule Graphism do
               target = plurals[rel[:plural]]
 
               unless target do
-                raise "Entity #{e[:name]} has relation #{rel[:name]} of unknown type: #{inspect(Map.keys(plurals))}. Relation: #{
-                        inspect(rel)
-                      }"
+                raise "Entity #{e[:name]} has relation #{rel[:name]} of unknown type: #{inspect(Map.keys(plurals))}. Relation: #{inspect(rel)}"
               end
 
               rel
@@ -863,7 +912,8 @@ defmodule Graphism do
 
   defp schema_module(e, schema, _opts) do
     indices = Migrations.indices_from_attributes(e) ++ Migrations.indices_from_keys(e)
-    scope_columns = Enum.map(e[:opts][:scope] || [], fn col -> String.to_existing_atom("#{col}_id") end)
+
+    scope_columns = Enum.map(e[:opts][:scope] || [], fn col -> String.to_atom("#{col}_id") end)
 
     quote do
       defmodule unquote(e[:schema_module]) do
