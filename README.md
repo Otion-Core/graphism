@@ -44,7 +44,16 @@ defmodule MyBlog.Schema do
   use Graphism,
     repo: MyBlog.Repo,
 
-    
+  entity :post do
+    string(:body)
+    has_many :comments
+
+    action(:read)
+    action(:list)
+    action(:create)
+    action(:update)
+    action(:delete)
+  end   
 
   entity :comment do
     string(:body)
@@ -64,8 +73,8 @@ Graphism will automatically add unique IDs as UUIDs to all entities in your sche
 
 ## Splitting your schema
 
-As your project grows, it might happen that your schema contains more and more entities. It is a good 
-practice to split the main schema by import smaller ones.
+As your project grows, your schema will more and more entities, and soon enough it will be quite challenging
+to manage in a single file. It is a good practice to split your main schema by importing smaller ones.
 
 The `MyBlog.Schema` can be rewritten as:
 
@@ -73,6 +82,7 @@ The `MyBlog.Schema` can be rewritten as:
 defmodule MyBlog.Schema do
 
   use Graphism, repo: MyBlog.Repo
+
   import_schema MyBlog.Post.Schema
   import_schema MyBlog.Comment.Schema
 end
@@ -116,7 +126,7 @@ defmodule MyBlog.Comment.Schema do
 end
 ```
 
-Any schema (including imported schemas) can contain any number of entities
+Any schema (including imported schemas) can contain any number of entities.
 
 ## Generate migrations :building_construction:
 
@@ -272,24 +282,3 @@ Graphism supports the following types of hooks:
 
 Please see the module documentations for further details.
 
-### Scopes
-
-Graphism provides with the `scope` construct as a convenience in order to implement access control using hooks. A scope
-is defined by its name, an optional description, an `allow` hook and a `filter` hook. Eg:
-
-```elixir
-scope :blog, "Restrict access to posts within a blog" do
-  allow post, context do
-    data.blog.id == context.blog.id
-  end
-
-  filter posts, context do
-    from(p in posts,
-      where: p.blog_id == ^context.blog.id
-    )
-  end
-end
-```
-
-In the above example, the `allow` clause will defined whether a given query or mutation on a post is allowed. 
-The `filter` clause will make sure we only return posts that belong to the blog we currently have in the our context.
