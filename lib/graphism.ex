@@ -95,6 +95,8 @@ defmodule Graphism do
   end
 
   defmacro __before_compile__(_) do
+    start = System.system_time(:millisecond)
+
     caller_module = __CALLER__.module
 
     repo =
@@ -144,9 +146,20 @@ defmodule Graphism do
         |> Module.get_attribute(:data)
         |> Keyword.merge(data_imports)
 
+      hooks_imports =
+        caller_module
+        |> Module.get_attribute(:schema_imports)
+        |> Enum.flat_map(fn mod ->
+          :attributes
+          |> mod.__info__()
+          |> Enum.filter(fn {name, _} -> name == :hooks end)
+          |> Enum.flat_map(fn {_, hooks} -> hooks end)
+        end)
+
       hooks =
         caller_module
         |> Module.get_attribute(:hooks)
+        |> Kernel.++(hooks_imports)
 
       enums =
         data
@@ -441,6 +454,9 @@ defmodule Graphism do
              ))
           end
         end
+
+      stop = System.system_time(:millisecond)
+      IO.puts("Schema #{inspect(caller_module)} assembled in #{stop - start}ms")
 
       List.flatten([
         context,
@@ -864,7 +880,9 @@ defmodule Graphism do
               target = plurals[rel[:plural]]
 
               unless target do
-                raise "Entity #{e[:name]} has relation #{rel[:name]} of unknown type: #{inspect(Map.keys(plurals))}. Relation: #{inspect(rel)}"
+                raise "Entity #{e[:name]} has relation #{rel[:name]} of unknown type: #{inspect(Map.keys(plurals))}. Relation: #{
+                        inspect(rel)
+                      }"
               end
 
               rel
