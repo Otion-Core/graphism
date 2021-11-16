@@ -3278,6 +3278,8 @@ defmodule Graphism do
     |> without_nils()
   end
 
+  defp keys_from(_), do: []
+
   defp key_from({:key, _, [opts]}) do
     [name: :natural, fields: opts]
   end
