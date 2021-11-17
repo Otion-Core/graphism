@@ -2548,7 +2548,12 @@ defmodule Graphism do
     end
   end
 
-  defp is_enum?(attr) do
+
+  defp boolean?(attr) do
+    attr[:kind] == :boolean 
+  end
+
+  defp enum?(attr) do
     attr[:opts][:one_of] != nil
   end
 
@@ -2556,12 +2561,12 @@ defmodule Graphism do
     attr[:opts][:one_of] || attr[:kind]
   end
 
-  defp has_default_value?(attr) do
+  defp with_default?(attr) do
     Keyword.has_key?(attr[:opts], :default)
   end
 
   defp graphql_nullable_type?(attr) do
-    optional?(attr) || (has_default_value?(attr) && !is_enum?(attr))
+    optional?(attr) || (with_default?(attr) && !enum?(attr) && !boolean?(attr))
   end
 
   defp unit_graphql_object() do

@@ -17,7 +17,7 @@ defmodule EnumTest do
     end
 
     test "are non null fields" do
-      calendar = Absinthe.Schema.lookup_type(EnumTest.Schema, :calendar)
+      calendar = Absinthe.Schema.lookup_type(__MODULE__.Schema, :calendar)
       category = calendar.fields.category
       assert %Absinthe.Type.NonNull{of_type: :categories} == category.type
     end
