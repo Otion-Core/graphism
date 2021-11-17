@@ -10,6 +10,8 @@ defmodule Graphism.Migrations do
 
   """
   def generate(opts) do
+    sh("mix compile --force")
+
     default_opts = [
       dir: Path.join([File.cwd!(), "priv/repo/migrations"]),
       write_to_disk: true
@@ -1342,5 +1344,22 @@ defmodule Graphism.Migrations do
 
   defp timestamps_ast() do
     {:timestamps, [line: 1], []}
+  end
+
+  def sh(cmd) do
+    {output, status} = System.cmd("sh", ["-c", cmd])
+
+    if status != 0 do
+      IO.inspect(cmd: cmd, rc: status, output: output)
+      System.halt(status)
+    end
+
+    output = String.trim(output)
+
+    if String.length(output) > 0 do
+      IO.puts(output)
+    end
+
+    output
   end
 end
