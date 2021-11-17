@@ -2589,7 +2589,7 @@ defmodule Graphism do
       kind =
         case attr[:opts][:allow] do
           nil ->
-            case graphql_nullable_type?(attr) || opts[:mode] == :update do
+            case graphql_nullable_type?(attr) || opts[:mode] == :input || opts[:mode] == :update do
               true ->
                 quote do
                   unquote(kind)
@@ -2935,7 +2935,7 @@ defmodule Graphism do
       quote do
         input_object unquote(input_type) do
           (unquote_splicing(
-             graphql_attribute_fields(target, schema, skip: [:id]) ++
+             graphql_attribute_fields(target, schema, mode: :input, skip: [:id]) ++
                graphql_relation_fields(target, schema,
                  mode: :input,
                  skip: [
@@ -3047,7 +3047,7 @@ defmodule Graphism do
                arg(
                  unquote(attr[:name]),
                  unquote(
-                   case optional?(attr) do
+                   case optional?(attr) || with_default?(attr) do
                      true ->
                        kind
 
