@@ -3223,8 +3223,8 @@ defmodule Graphism do
     [attribute(attr)]
   end
 
-  defp attributes_from(_) do
-    []
+  defp attributes_from(other) do
+    without_nils([attribute(other)])
   end
 
   defp attribute({:attribute, _, opts}), do: attribute(opts)
@@ -3278,7 +3278,7 @@ defmodule Graphism do
     |> without_nils()
   end
 
-  defp keys_from(_), do: []
+  defp keys_from(_), do: [] 
 
   defp key_from({:key, _, [opts]}) do
     [name: :natural, fields: opts]
