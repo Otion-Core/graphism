@@ -28,6 +28,8 @@ defmodule Graphism.Plug do
     schema = Keyword.fetch!(opts, :schema)
 
     quote do
+      require unquote(schema)
+
       plug(Plug.Parsers,
         parsers: [:urlencoded, :multipart, :json, Absinthe.Plug.Parser],
         pass: ["*/*"],
