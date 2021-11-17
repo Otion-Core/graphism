@@ -2,11 +2,6 @@ defmodule MigrationsTest do
   use ExUnit.Case
   alias Graphism.Migrations
 
-  defmodule AllowEverything do
-    def allow?(_, _), do: true
-    def scope(q, _), do: q
-  end
-
   test "detects when an existing field becomes optional" do
     defmodule MySchema do
       use Graphism, repo: TestRepo
@@ -180,7 +175,7 @@ defmodule MigrationsTest do
 
     assert [path: _, code: code] = Migrations.generate(opts)
     assert code
-    assert code =~ "create(unique_index(:blogs, [:name], name: :unique_name_in_blogs))"
+    assert code =~ "create(unique_index(:blogs, [:name], name: :blogs_name_key))"
 
     opts = Keyword.put(opts, :files, opts[:files] ++ [code])
     assert [] = Migrations.generate(opts)
@@ -213,7 +208,7 @@ defmodule MigrationsTest do
               add(:name, :string, null: false)
             end
 
-            create(unique_index(:blogs, [:name], name: :unique_name_in_blogs))
+            create(unique_index(:blogs, [:name], name: :blogs_name_key))
           end
 
           def(down) do
@@ -225,7 +220,7 @@ defmodule MigrationsTest do
 
     assert [path: _, code: code] = Migrations.generate(opts)
     assert code
-    assert code =~ "drop_if_exists(index(:blogs, [:name], name: :unique_name_in_blogs))"
+    assert code =~ "drop_if_exists(index(:blogs, [:name], name: :blogs_name_key))"
 
     opts = Keyword.put(opts, :files, opts[:files] ++ [code])
     assert [] = Migrations.generate(opts)
@@ -269,7 +264,7 @@ defmodule MigrationsTest do
     assert code
     assert code =~ "alter(table(:blogs))"
     assert code =~ "add(:name, :string, unique: true, null: false)"
-    assert code =~ "create(unique_index(:blogs, [:name], name: :unique_name_in_blogs))"
+    assert code =~ "create(unique_index(:blogs, [:name], name: :blogs_name_key))"
 
     opts = Keyword.put(opts, :files, opts[:files] ++ [code])
     assert [] = Migrations.generate(opts)
@@ -301,7 +296,7 @@ defmodule MigrationsTest do
               add(:name, :string, unique: true, null: false)
             end
 
-            create(unique_index(:blogs, [:name], name: :unique_name_in_blogs))
+            create(unique_index(:blogs, [:name], name: :blogs_name_key))
           end
 
           def(down) do
@@ -315,7 +310,7 @@ defmodule MigrationsTest do
     assert code
     assert code =~ "alter(table(:blogs))"
     assert code =~ "remove(:name)"
-    assert code =~ "drop_if_exists(index(:blogs, [:name], name: :unique_name_in_blogs))"
+    assert code =~ "drop_if_exists(index(:blogs, [:name], name: :blogs_name_key))"
 
     opts = Keyword.put(opts, :files, opts[:files] ++ [code])
     assert [] = Migrations.generate(opts)

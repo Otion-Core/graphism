@@ -10,7 +10,7 @@ defmodule Graphism.Migrations do
 
   """
   def generate(opts) do
-    sh("mix compile --force")
+    # sh("mix compile --force")
 
     default_opts = [
       dir: Path.join([File.cwd!(), "priv/repo/migrations"]),

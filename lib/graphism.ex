@@ -95,8 +95,6 @@ defmodule Graphism do
   end
 
   defmacro __before_compile__(_) do
-    start = System.system_time(:millisecond)
-
     caller_module = __CALLER__.module
 
     repo =
@@ -454,9 +452,6 @@ defmodule Graphism do
              ))
           end
         end
-
-      stop = System.system_time(:millisecond)
-      IO.puts("Schema #{inspect(caller_module)} assembled in #{stop - start}ms")
 
       List.flatten([
         context,
@@ -2553,8 +2548,20 @@ defmodule Graphism do
     end
   end
 
+  defp is_enum?(attr) do
+    attr[:opts][:one_of] != nil
+  end
+
   defp attr_graphql_type(attr) do
     attr[:opts][:one_of] || attr[:kind]
+  end
+
+  defp has_default_value?(attr) do
+    Keyword.has_key?(attr[:opts], :default)
+  end
+
+  defp graphql_nullable_type?(attr) do
+    optional?(attr) || (has_default_value?(attr) && !is_enum?(attr))
   end
 
   defp unit_graphql_object() do
@@ -2577,8 +2584,7 @@ defmodule Graphism do
       kind =
         case attr[:opts][:allow] do
           nil ->
-            case optional?(attr) || Keyword.has_key?(attr[:opts], :default) ||
-                   opts[:mode] == :update do
+            case graphql_nullable_type?(attr) || opts[:mode] == :update do
               true ->
                 quote do
                   unquote(kind)
