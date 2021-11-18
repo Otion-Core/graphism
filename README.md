@@ -1,11 +1,7 @@
 # Graphism
 
-An Elixir DSL that makes it easier to build Absinthe powered GraphQL apis 
+An Elixir DSL that makes it faster & easier to build Absinthe powered GraphQL apis 
 on top of Ecto and Postgres.
-
-<p align="center">
-  <img height="350" src="https://support.bite.social/images/graphism.png">
-</p>
 
 ## Contributing
 
@@ -73,8 +69,8 @@ Graphism will automatically add unique IDs as UUIDs to all entities in your sche
 
 ## Splitting your schema
 
-As your project grows, your schema will more and more entities, and soon enough it will be quite challenging
-to manage in a single file. It is a good practice to split your main schema by importing smaller ones.
+As your project grows, your schema will contain more and more entities, and soon enough it will be quite challenging
+to manage everything in a single file.  
 
 The `MyBlog.Schema` can be rewritten as:
 
@@ -269,6 +265,38 @@ end
 ```
 
 It is essential to provide the implementation for your custom action as a simple `:using` Graphism hook.
+
+### Lookup arguments
+
+Let's say you want to create an invite for a user. Here is a basic schema:
+
+```elixir
+entity :user do
+  unique(string(:email))
+  ...
+end
+
+entity :invite do
+  belongs_to(:user)
+  action(:create)
+  ...
+end
+```
+
+With this, your create create invite mutation will receive the ID of an existing user. But in practice,
+sometimes it might happen that you don't know that user's id, just their email.
+
+In that case, you can tell Graphism to lookup the user by their email for you:
+
+```elixir
+entity :invite do
+  ...
+  action(:create, lookup: [user: :email])
+  ...
+end
+```
+
+Graphism will however complain if the lookup you are defining is not based on a unique key.
 
 ### Hooks
 
