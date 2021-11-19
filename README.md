@@ -65,7 +65,7 @@ end
 
 ```
 
-Graphism will automatically add unique IDs as UUIDs to all entities in your schema.
+By default, Graphism will automatically add unique IDs as UUIDs to all entities in your schema.
 
 ## Splitting your schema
 
@@ -283,7 +283,7 @@ entity :invite do
 end
 ```
 
-With this, your create create invite mutation will receive the ID of an existing user. But in practice,
+With this, your create invite mutation will receive the ID of an existing user. But in practice,
 sometimes it might happen that you don't know that user's id, just their email.
 
 In that case, you can tell Graphism to lookup the user by their email for you:
@@ -297,6 +297,21 @@ end
 ```
 
 Graphism will however complain if the lookup you are defining is not based on a unique key.
+
+### Client generated ids
+
+Sometimes it makes more sense to let the client specify their own ids:
+
+```elixir
+entity :item, modifiers: [:client_ids] do
+  ...
+  action(:create)
+  ...
+end
+```
+
+This will stop Graphism from generating ids for you. However you will still need to pass in a valid
+UUID v4 string.
 
 ### Hooks
 

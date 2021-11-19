@@ -14,7 +14,7 @@ defmodule Analytic.LookupArgsTest do
 
       entity :invite do
         belongs_to(:user)
-        action(:create, args: [user: :email])
+        action(:create, lookup: [user: :email])
       end
     end
 
