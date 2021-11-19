@@ -1,13 +1,8 @@
-[BT-NNNN]
+### Description
 
-### Description :page_with_curl:
+Describe what this change is about 
 
-Describe the changes and motivations for the pull request, unless evident from the title.
+### Checklist
 
-### How to test :question:
-
-- FIXME: Add the steps describing how to verify your changes
-
-### TODO :construction:
-- [ ] :art: Compare implementation with what's designed, manually
-- [ ] :+1: Get 1 approval
+- [ ] Added or modified tests 
+- [ ] Added an entry to the CHANGELOG
