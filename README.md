@@ -313,6 +313,33 @@ end
 This will stop Graphism from generating ids for you. However you will still need to pass in a valid
 UUID v4 string.
 
+### Composite keys
+
+By default, Graphism uses UUIDs as primary keys, and, as you've already seen, it is also possible to define
+unique keys, such as a name, or an email, using the `unique(string(:name))` or `unique(string(:email))` notation.
+
+But sometimes unique keys are made of more than just one field:
+
+```elixir
+entity :user do
+  unique(string(:name))
+end
+      
+entity :organisation do 
+  unique(string(:name))
+end
+
+entity :membership do
+  belongs_to(:user)
+  belongs_to(:organisation)
+  key([:user, :organisation]) # <-- composite key
+  action(:read)
+end
+```
+
+In the above example, we are saying that a user can belong to an organisation only once. Graphism will take
+care of creating the right indices and GraphQL queries for you.
+
 ### Hooks
 
 Hooks are a mechanism in Graphism for customization. They are implemented as standard OTP behaviours.
