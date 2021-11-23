@@ -1144,10 +1144,15 @@ defmodule Graphism do
     end
   end
 
+  defp get_by_key_fun_name(key) do
+    fields = Enum.join(key[:fields], "_and_")
+    String.to_atom("get_by_#{fields}")
+  end
+
   defp get_by_key_resolver_funs(e) do
     e[:keys]
     |> Enum.map(fn key ->
-      fun_name = String.to_atom("get_by_#{key[:name]}_key")
+      fun_name = get_by_key_fun_name(key)
 
       args =
         Enum.map(key[:fields], fn name ->
@@ -2226,7 +2231,7 @@ defmodule Graphism do
 
   defp get_by_key_api_funs(e, schema_module, repo_module, schema) do
     Enum.map(e[:keys], fn key ->
-      fun_name = String.to_atom("get_by_#{key[:name]}_key")
+      fun_name = get_by_key_fun_name(key)
 
       args =
         Enum.map(key[:fields], fn name ->
@@ -2237,8 +2242,16 @@ defmodule Graphism do
 
       filters =
         Enum.map(key[:fields], fn field ->
-          quote do
-            {unquote(field), unquote(var(field))}
+          case relation?(e, field) do
+            nil ->
+              quote do
+                {unquote(field), unquote(var(field))}
+              end
+
+            _ ->
+              quote do
+                {unquote(String.to_atom("#{field}_id")), unquote(var(field))}
+              end
           end
         end)
 
@@ -2901,8 +2914,10 @@ defmodule Graphism do
   defp graphql_query_find_by_keys(e, _schema) do
     e[:keys]
     |> Enum.map(fn key ->
-      description = "Find a single #{e[:display_name]} given its #{key[:name]} key"
-      resolver_fun = String.to_atom("get_by_#{key[:name]}_key")
+      fields = key[:fields] |> Enum.join(" and ")
+      description = "Find a single #{e[:display_name]} given its #{fields}"
+      resolver_fun = get_by_key_fun_name(key)
+      query_name = resolver_fun |> to_string() |> String.replace("get_", "") |> String.to_atom()
 
       args =
         Enum.map(key[:fields], fn name ->
@@ -2923,7 +2938,7 @@ defmodule Graphism do
 
       quote do
         @desc unquote(description)
-        field :by, non_null(unquote(e[:name])) do
+        field unquote(query_name), non_null(unquote(e[:name])) do
           unquote_splicing(args)
           resolve(&(unquote(e[:resolver_module]).unquote(resolver_fun) / 3))
         end
@@ -3347,10 +3362,12 @@ defmodule Graphism do
   defp keys_from(_), do: []
 
   defp key_from({:key, _, [opts]}) do
-    [name: :natural, fields: opts]
+    [name: key_name(opts), fields: opts]
   end
 
   defp key_from(_), do: nil
+
+  defp key_name(fields), do: fields |> Enum.map(&to_string/1) |> Enum.join("_") |> String.to_atom()
 
   defp maybe_add_id_attribute(attrs) do
     if attrs |> Enum.filter(fn attr -> attr[:name] == :id end) |> Enum.empty?() do
