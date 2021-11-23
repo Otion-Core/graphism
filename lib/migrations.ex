@@ -119,6 +119,12 @@ defmodule Graphism.Migrations do
     })
   end
 
+  def foreign_key_constraint_from_relation(e, rel) do
+    field = "#{e[:name]}_#{rel[:name]}"
+    name = "#{e[:table]}_#{rel[:name]}_id_fkey"
+    [name: String.to_atom(name), field: String.to_atom(field)]
+  end
+
   def indices_from_attributes(e) do
     e[:attributes]
     |> Enum.filter(&unique?(&1))
