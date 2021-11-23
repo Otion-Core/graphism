@@ -186,6 +186,20 @@ For convenience, `Plug.Cowboy` is automatically downloaded by Graphism, so you d
 
 ## Schema Features :abacus:
 
+### Unique attributes
+
+If you wish to ensure unicity, you can declare a field being `:unique`:
+
+```elixir
+entity :user do
+  unique(string(:email))
+  ...
+end
+```
+
+Graphism will generate proper GraphQL queries for you, as well as indices in your database migrations.
+
+
 ### Optional attributes
 
 Any standard attribute can be made optional:
