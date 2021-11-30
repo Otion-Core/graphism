@@ -1213,7 +1213,7 @@ defmodule Graphism do
 
     unless attr do
       raise """
-      no such attribute #{name} in entity #{e[:name]}. 
+      no such attribute #{name} in entity #{e[:name]}.
         Existing attributes: #{e[:attributes] |> names() |> inspect()}"
       """
     end
@@ -1238,7 +1238,7 @@ defmodule Graphism do
 
     unless rel do
       raise """
-      no such relation #{name} in entity #{e[:name]}. 
+      no such relation #{name} in entity #{e[:name]}.
         Existing relations: #{e[:relations] |> names() |> inspect()}"
       """
     end
@@ -2199,8 +2199,14 @@ defmodule Graphism do
     quote do
       def get_by_id(id, opts \\ []) do
         preloads =
-          unquote(child_preloads(e, schema)) ++
-            unquote(parent_preloads(e, schema)) ++ (opts[:preload] || [])
+          case opts[:skip_preloads] do
+            true ->
+              []
+
+            _ ->
+              unquote(child_preloads(e, schema)) ++
+                unquote(parent_preloads(e, schema)) ++ (opts[:preload] || [])
+          end
 
         case unquote(schema_module)
              |> unquote(repo_module).get(id)
@@ -2257,12 +2263,21 @@ defmodule Graphism do
 
       quote do
         def unquote(fun_name)(unquote_splicing(args), opts \\ []) do
-          more_preloads = opts[:preload] || []
+          preloads =
+            case opts[:skip_preloads] do
+              true ->
+                []
+
+              _ ->
+                unquote(child_preloads(e, schema)) ++
+                  unquote(parent_preloads(e, schema)) ++ (opts[:preload] || [])
+            end
+
           filters = [unquote_splicing(filters)]
 
           case unquote(schema_module)
                |> unquote(repo_module).get_by(filters)
-               |> unquote(repo_module).preload(unquote(parent_preloads(e, schema)) ++ more_preloads) do
+               |> unquote(repo_module).preload(preloads) do
             nil ->
               {:error, :not_found}
 
@@ -2319,11 +2334,19 @@ defmodule Graphism do
             )
           ]
 
-          more_preloads = opts[:preload] || []
+          preloads =
+            case opts[:skip_preloads] do
+              true ->
+                []
+
+              _ ->
+                unquote(child_preloads(e, schema)) ++
+                  unquote(parent_preloads(e, schema)) ++ (opts[:preload] || [])
+            end
 
           case unquote(schema_module)
                |> unquote(repo_module).get_by(filters)
-               |> unquote(repo_module).preload(unquote(parent_preloads(e, schema)) ++ more_preloads) do
+               |> unquote(repo_module).preload(preloads) do
             nil ->
               {:error, :not_found}
 
