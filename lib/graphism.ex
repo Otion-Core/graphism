@@ -2476,7 +2476,7 @@ defmodule Graphism do
 
     refetch =
       quote do
-        {:ok, unquote(var(e))} <- get_by_id(unquote(var(e)).id)
+        {:ok, unquote(var(e))} <- get_by_id(unquote(var(e)).id, opts)
       end
 
     before_hooks = hooks(e, :before, :create)
@@ -2544,7 +2544,7 @@ defmodule Graphism do
 
     refetch =
       quote do
-        {:ok, unquote(var(e))} <- get_by_id(unquote(var(e)).id)
+        {:ok, unquote(var(e))} <- get_by_id(unquote(var(e)).id, opts)
       end
 
     before_hooks = hooks(e, :before, :update)
@@ -2559,7 +2559,8 @@ defmodule Graphism do
                 |> vars()
               ),
               unquote(var(e)),
-              attrs
+              attrs,
+              opts \\ []
             ) do
           unquote(repo_module).transaction(fn ->
             with unquote_splicing(
