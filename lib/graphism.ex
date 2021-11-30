@@ -1063,6 +1063,27 @@ defmodule Graphism do
               end
             end)
           )
+
+          unquote_splicing(
+            e
+            |> parent_relations()
+            |> Enum.map(fn rel ->
+              constraint = Migrations.foreign_key_constraint_from_relation(e, rel)
+              name = constraint[:name]
+              field = constraint[:field]
+              message = "referenced data does not exist"
+
+              quote do
+                changes =
+                  changes
+                  |> foreign_key_constraint(
+                    unquote(field),
+                    name: unquote(name),
+                    message: unquote(message)
+                  )
+              end
+            end)
+          )
         end
 
         def delete_changeset(e) do
