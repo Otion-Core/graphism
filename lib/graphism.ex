@@ -684,6 +684,9 @@ defmodule Graphism do
   defmacro datetime(_name, _opts \\ []) do
   end
 
+  defmacro date(_name, _opts \\ []) do
+  end
+
   defmacro decimal(_name, _opts \\ []) do
   end
 
@@ -3386,6 +3389,7 @@ defmodule Graphism do
   defp attribute({:boolean, _, [name]}), do: attribute([name, :boolean])
   defp attribute({:float, _, [name]}), do: attribute([name, :float])
   defp attribute({:datetime, _, [name]}), do: attribute([name, :datetime])
+  defp attribute({:date, _, [name]}), do: attribute([name, :date])
   defp attribute({:decimal, _, [name]}), do: attribute([name, :decimal])
 
   defp attribute({kind, _, [attr, opts]}) do
