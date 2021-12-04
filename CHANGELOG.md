@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+* Ability to chain after hooks - [#53](https://github.com/Gravity-Core/graphism/pull/53)
+
 ## 0.2.0 (Dec 3rd, 2021)
 
 * Support for dates without time information - [#51](https://github.com/Gravity-Core/graphism/pull/51)
@@ -9,5 +11,5 @@
 * Optional preloads - [#49](https://github.com/Gravity-Core/graphism/pull/49)
 * Graceful foreign key constraint validations - [#48](https://github.com/Gravity-Core/graphism/pull/48)
 * Composite keys - [#47](https://github.com/Gravity-Core/graphism/pull/47)
-* Client generated ids - [#46](https://github.com/Gravity-Core/graphism/pull/46) 
-* Lookup arguments - [#44](https://github.com/Gravity-Core/graphism/pull/44) 
+* Client generated ids - [#46](https://github.com/Gravity-Core/graphism/pull/46)
+* Lookup arguments - [#44](https://github.com/Gravity-Core/graphism/pull/44)
