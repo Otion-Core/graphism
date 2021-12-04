@@ -2405,7 +2405,7 @@ defmodule Graphism do
 
   defp hook_call(e, mod, :after, _) do
     quote do
-      {:ok, _} <- unquote(mod).execute(unquote(var(e)))
+      {:ok, unquote(var(e))} <- unquote(mod).execute(unquote(var(e)))
     end
   end
 
