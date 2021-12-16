@@ -1968,7 +1968,6 @@ defmodule Graphism do
           end
         end
       end
-      |> debug_ast(e[:name] == :activity_log)
     end)
   end
 
