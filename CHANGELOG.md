@@ -2,7 +2,8 @@
 
 ## Unreleased
 
-* Custom mutations and computed attributes improvements - [#55](https://github.com/Gravity-Core/graphism/pull/55)
+* Default attributes improvements - [#56](https://github.com/Gravity-Core/graphism/pull/56)
+* Custom mutations improvements - [#55](https://github.com/Gravity-Core/graphism/pull/55)
 
 ## 0.2.1 (Dec 4rd, 2021)
 
