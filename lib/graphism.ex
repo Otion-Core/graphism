@@ -647,7 +647,10 @@ defmodule Graphism do
   defmacro belongs_to(_name, _opts \\ []) do
   end
 
-  defmacro key(_opts \\ []) do
+  defmacro key(_fields, _opts \\ []) do
+  end
+
+  defmacro index(_opts \\ []) do
   end
 
   defmacro action(_name, _opts \\ []) do
@@ -1171,8 +1174,13 @@ defmodule Graphism do
     String.to_atom("get_by_#{fields}")
   end
 
+  defp unique_keys(e) do
+    Enum.filter(e[:keys], fn k -> k[:unique] end)
+  end
+
   defp get_by_key_resolver_funs(e) do
-    e[:keys]
+    e
+    |> unique_keys()
     |> Enum.map(fn key ->
       fun_name = get_by_key_fun_name(key)
 
@@ -2295,7 +2303,9 @@ defmodule Graphism do
   end
 
   defp get_by_key_api_funs(e, schema_module, repo_module, schema) do
-    Enum.map(e[:keys], fn key ->
+    e
+    |> unique_keys()
+    |> Enum.map(fn key ->
       fun_name = get_by_key_fun_name(key)
 
       args =
@@ -2995,7 +3005,8 @@ defmodule Graphism do
   end
 
   defp graphql_query_find_by_keys(e, _schema) do
-    e[:keys]
+    e
+    |> unique_keys()
     |> Enum.map(fn key ->
       fields = key[:fields] |> Enum.join(" and ")
       description = "Find a single #{e[:display_name]} given its #{fields}"
@@ -3457,15 +3468,18 @@ defmodule Graphism do
 
   defp keys_from({:__block__, _, items}) do
     items
-    |> Enum.filter(&match?({:key, _, _}, &1))
     |> Enum.map(&key_from/1)
     |> without_nils()
   end
 
   defp keys_from(_), do: []
 
-  defp key_from({:key, _, [opts]}) do
-    [name: key_name(opts), fields: opts]
+  defp key_from({:key, _, [fields]}) do
+    [name: key_name(fields), fields: fields, unique: true]
+  end
+
+  defp key_from({:key, _, [fields, opts]}) do
+    [name: key_name(fields), fields: fields, unique: Keyword.get(opts, :unique, true)]
   end
 
   defp key_from(_), do: nil

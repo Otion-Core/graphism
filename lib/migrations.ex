@@ -284,13 +284,13 @@ defmodule Graphism.Migrations do
     end
   end
 
-  defp index_from_key(key, e), do: index_for(e, key[:fields])
+  defp index_from_key(key, e), do: index_for(e, key[:fields], unique: key[:unique])
 
-  defp index_for(e, fields) do
+  defp index_for(e, fields, opts \\ [unique: true]) do
     table = e[:table]
     column_names = fields |> Enum.map(&column_name_from_field(&1, e))
     index_name = String.to_atom("#{table}_#{Enum.join(column_names, "_")}_key")
-    %{table: table, name: index_name, columns: column_names}
+    %{table: table, name: index_name, columns: column_names, unique: opts[:unique]}
   end
 
   defp missing_migrations(existing, schema, enums) do
@@ -569,7 +569,8 @@ defmodule Graphism.Migrations do
       action: action,
       kind: :index,
       table: index[:table],
-      columns: index[:columns]
+      columns: index[:columns],
+      unique: index[:unique]
     }
   end
 
@@ -915,7 +916,7 @@ defmodule Graphism.Migrations do
             {:unique_index, _, [table, columns, opts]}
           ]}
        ) do
-    index_change(table, action, columns, opts)
+    index_change(table, action, columns, Keyword.put(opts, :unique, true))
   end
 
   defp parse_up(
@@ -924,7 +925,7 @@ defmodule Graphism.Migrations do
             {:index, _, [table, columns, opts]}
           ]}
        ) do
-    index_change(table, action, columns, opts)
+    index_change(table, action, columns, Keyword.put(opts, :unique, false))
   end
 
   defp parse_up(
@@ -1033,7 +1034,7 @@ defmodule Graphism.Migrations do
   end
 
   defp index_change(table, action, columns, opts) do
-    %{index: opts[:name], action: action, kind: :index, table: table, columns: columns}
+    %{index: opts[:name], action: action, kind: :index, table: table, columns: columns, unique: opts[:unique]}
   end
 
   defp enum_change(enum, action, values) do
@@ -1266,11 +1267,18 @@ defmodule Graphism.Migrations do
          action: :create,
          kind: :index,
          table: table,
-         columns: columns
+         columns: columns,
+         unique: unique
        }) do
+    index_type =
+      case unique do
+        true -> :unique_index
+        false -> :index
+      end
+
     {:create, [line: 1],
      [
-       {:unique_index, [line: 1], [table, columns, [name: index]]}
+       {index_type, [line: 1], [table, columns, [name: index]]}
      ]}
   end
 
@@ -1290,11 +1298,7 @@ defmodule Graphism.Migrations do
   defp quote_migration(%{enum: name, action: :create, kind: :enum, values: values}) do
     {:execute, [line: 1],
      [
-       "create type #{name} as ENUM (#{
-         values
-         |> Enum.map(fn value -> "'#{value}'" end)
-         |> Enum.join(",")
-       })"
+       "create type #{name} as ENUM (#{values |> Enum.map(fn value -> "'#{value}'" end) |> Enum.join(",")})"
      ]}
   end
 

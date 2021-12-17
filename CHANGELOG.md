@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+* Non unique keys - [#57](https://github.com/Gravity-Core/graphism/pull/57)
 * Custom mutations and computed attributes improvements - [#55](https://github.com/Gravity-Core/graphism/pull/55)
 
 ## 0.2.1 (Dec 4rd, 2021)
