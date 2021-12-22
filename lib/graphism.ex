@@ -65,6 +65,7 @@ defmodule Graphism do
         use Absinthe.Schema
         import Absinthe.Resolution.Helpers, only: [dataloader: 1]
         import_types(Absinthe.Type.Custom)
+        import_types(Absinthe.Plug.Types)
 
         @sources [unquote(__CALLER__.module).Dataloader.Repo]
         @fields_auth unquote(__CALLER__.module).FieldsAuth
@@ -696,6 +697,9 @@ defmodule Graphism do
   defmacro preloaded(_name, _opts \\ []) do
   end
 
+  defmacro upload(_name, _opts \\ []) do
+  end
+
   defp without_nils(enum) do
     Enum.reject(enum, fn item -> item == nil end)
   end
@@ -722,7 +726,8 @@ defmodule Graphism do
     :integer,
     :number,
     :date,
-    :boolean
+    :boolean,
+    :upload
   ]
 
   defp validate_attribute_type!(type) do
@@ -955,7 +960,7 @@ defmodule Graphism do
         schema unquote("#{e[:plural]}") do
           unquote_splicing(
             e[:attributes]
-            |> Enum.reject(fn attr -> attr[:name] == :id end)
+            |> Enum.reject(fn attr -> attr[:name] == :id or virtual?(attr) end)
             |> Enum.map(fn attr ->
               kind = ecto_datatype(attr[:kind])
 
@@ -1004,7 +1009,7 @@ defmodule Graphism do
 
         @required_fields unquote(
                            (e[:attributes]
-                            |> Enum.reject(&optional?(&1))
+                            |> Enum.reject(&(optional?(&1) || virtual?(&1)))
                             |> Enum.map(fn attr ->
                               attr[:name]
                             end)) ++
@@ -3456,6 +3461,7 @@ defmodule Graphism do
   defp attribute({:datetime, _, [name]}), do: attribute([name, :datetime])
   defp attribute({:date, _, [name]}), do: attribute([name, :date])
   defp attribute({:decimal, _, [name]}), do: attribute([name, :decimal])
+  defp attribute({:upload, _, [name]}), do: attribute([name, :upload, [modifiers: [:virtual]]])
 
   defp attribute({kind, _, [attr, opts]}) do
     with attr when attr != nil <- attribute({kind, nil, [attr]}) do
