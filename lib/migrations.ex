@@ -81,7 +81,9 @@ defmodule Graphism.Migrations do
     # convert entity attributes as simple columns
     # to be added to the table migrations
     m =
-      Enum.reduce(e[:attributes], %{}, fn attr, m ->
+      e[:attributes]
+      |> Enum.reject(&virtual?/1)
+      |> Enum.reduce(%{}, fn attr, m ->
         name = column_name_from_attribute(attr)
         type = column_type_from_attribute(attr)
         opts = column_opts_from_attribute(attr)

@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+* File uploads - [#59](https://github.com/Gravity-Core/graphism/pull/59)
+
 ## 0.2.2 (Dec 17th, 2021)
 
 * Non unique keys - [#57](https://github.com/Gravity-Core/graphism/pull/57)
