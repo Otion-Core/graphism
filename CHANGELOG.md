@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.3.0 (Dec 28th, 2021)
+
 * File uploads - [#59](https://github.com/Gravity-Core/graphism/pull/59)
 
 ## 0.2.2 (Dec 17th, 2021)
