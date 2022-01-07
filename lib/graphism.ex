@@ -1735,7 +1735,10 @@ defmodule Graphism do
               unquote(var(attr)) <- get_in(context, unquote(from))
             end,
             quote do
-              args <- Map.put(args, unquote(attr[:name]), unquote(var(attr)).id)
+              unquote(var(attr)) <- Map.get(unquote(var(attr)), :id)
+            end,
+            quote do
+              args <- Map.put(args, unquote(attr[:name]), unquote(var(attr)))
             end
           ]
 
