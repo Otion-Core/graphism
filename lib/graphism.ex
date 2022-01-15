@@ -46,6 +46,11 @@ defmodule Graphism do
 
       alias Dataloader, as: DL
 
+      middleware =
+        Enum.map(opts[:middleware] || [], fn {:__aliases__, _, mod} ->
+          Module.concat(mod)
+        end)
+
       quote do
         defmodule Dataloader.Repo do
           @queryables unquote(__CALLER__.module).DataloaderQueries
@@ -69,6 +74,7 @@ defmodule Graphism do
 
         @sources [unquote(__CALLER__.module).Dataloader.Repo]
         @fields_auth unquote(__CALLER__.module).FieldsAuth
+        @middleware unquote(middleware)
 
         def context(ctx) do
           loader =
@@ -84,7 +90,7 @@ defmodule Graphism do
         end
 
         def middleware(middleware, _field, _object) do
-          middleware ++ [@fields_auth, Graphism.ErrorMiddleware]
+          @middleware ++ middleware ++ [@fields_auth, Graphism.ErrorMiddleware]
         end
       end
     else

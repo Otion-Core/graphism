@@ -366,3 +366,11 @@ Graphism supports the following types of hooks:
 
 Please see the module documentations for further details.
 
+### Absinthe middleware
+
+Custom Absinthe middlewares can be also be plugged:
+
+```elixir
+use Graphism, repo: ..., middleware: [My.Middleware]
+```
+
