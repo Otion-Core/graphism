@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.3.2 (Jan 15th, 2022)
+
 * Absinthe middleware - [#63](https://github.com/Gravity-Core/graphism/pull/63)
 
 ## 0.3.1 (Jan 7th, 2022)
