@@ -673,6 +673,9 @@ defmodule Graphism do
   defmacro optional(_attr, _opts \\ []) do
   end
 
+  defmacro maybe(_attr, _opts \\ []) do
+  end
+
   defmacro private(_attr, _opts \\ []) do
   end
 
@@ -2261,18 +2264,14 @@ defmodule Graphism do
   defp parent_preloads(e, schema) do
     e[:relations]
     |> Enum.filter(fn rel -> rel[:kind] == :belongs_to end)
+    |> Enum.reject(fn rel ->
+      rel[:target] == e[:name]
+    end)
     |> Enum.map(fn rel ->
       parent = find_entity!(schema, rel[:target])
       ancestor_preloads = parent_preloads(parent, schema)
       sibbling_reploads = child_preloads(parent, schema)
       {rel[:name], ancestor_preloads ++ sibbling_reploads}
-      # case parent_preloads(target, schema) do
-      #  [] ->
-      #    rel[:name]
-
-      #  parent_preloads ->
-      #    {rel[:name], parent_preloads}
-      # end
     end)
   end
 
@@ -3445,6 +3444,12 @@ defmodule Graphism do
     put_in(attr, [:opts, :modifiers], modifiers)
   end
 
+  defp attribute({:maybe, _, [opts]}) do
+    attribute({:optional, nil, [opts]})
+  end
+
+  defp attribute({:optional, _, [{:belongs_to, _, _}]}), do: nil
+
   defp attribute({:optional, _, [opts]}) do
     attr = attribute(opts)
     modifiers = [:optional | get_in(attr, [:opts, :modifiers]) || []]
@@ -3519,6 +3524,15 @@ defmodule Graphism do
 
   defp relations_from(_) do
     []
+  end
+
+  defp relation_from({:maybe, _, [opts]}),
+    do: relation_from({:optional, nil, [opts]})
+
+  defp relation_from({:optional, _, [{kind, _, _} = opts]}) when kind in [:belongs_to, :has_many] do
+    rel = relation_from(opts)
+    modifiers = get_in(rel, [:opts, :modifiers]) || []
+    put_in(rel, [:opts, :modifiers], [:optional | modifiers])
   end
 
   defp relation_from({:has_many, _, [name]}),
