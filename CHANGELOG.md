@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.3.3 (Feb 1st, 2022)
+
 * Self referencing entities - [#65](https://github.com/Gravity-Core/graphism/pull/65)
 
 ## 0.3.2 (Jan 15th, 2022)
