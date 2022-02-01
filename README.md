@@ -184,7 +184,7 @@ end
 
 For convenience, `Plug.Cowboy` is automatically downloaded by Graphism, so you don't need to add it to your project.
 
-## Schema Features :abacus:
+## Schema Features
 
 ### Unique attributes
 
@@ -242,6 +242,17 @@ However, since they are computed, they won't be included in your mutations, ther
 ```elixir
 entity :post do
   computed(boolean(:draft, default: true)
+  ...
+end
+```
+
+### Self referencing entities
+
+Sometimes it is useful to have schemas where an entity needs to reference itself, eg when building a tree-like structure:
+
+```elixir
+entity :node do
+  maybe(belongs_to(:node, as: :parent))
   ...
 end
 ```
