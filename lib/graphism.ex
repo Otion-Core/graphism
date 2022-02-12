@@ -2160,7 +2160,7 @@ defmodule Graphism do
 
         quote do
           defmodule unquote(e[:api_module]) do
-            import Ecto.Query, only: [from: 2]
+            import Ecto.Query
             (unquote_splicing(api_funs))
           end
         end
@@ -2197,16 +2197,37 @@ defmodule Graphism do
     end
   end
 
-  defp with_api_list_funs(funs, e, schema_module, repo_module, schema, hooks) do
+  defp entity_sort(e) do
+    case e[:opts][:sort] do
+      :none -> nil
+      nil -> [asc: :inserted_at]
+      other -> other
+    end
+  end
+
+  defp entity_list_query_opts(e, schema) do
     preloads = parent_preloads(e, schema)
+
+    opts = [
+      preload: preloads
+    ]
+
+    case entity_sort(e) do
+      nil -> opts
+      sort -> Keyword.put(opts, :order_by, sort)
+    end
+  end
+
+  defp with_api_list_funs(funs, e, schema_module, repo_module, schema, hooks) do
+    query_opts = entity_list_query_opts(e, schema)
 
     [
       quote do
         def list(context \\ %{}) do
           query =
-            from(unquote(var(e)) in unquote(schema_module),
-              order_by: [asc: :inserted_at],
-              preload: unquote(preloads)
+            from(
+              unquote(var(e)) in unquote(schema_module),
+              unquote(query_opts)
             )
 
           unquote(
@@ -2229,11 +2250,11 @@ defmodule Graphism do
           quote do
             def unquote(String.to_atom("list_by_#{rel[:name]}"))(id, context \\ %{}) do
               query =
-                from(unquote(var(rel)) in unquote(schema_module),
-                  where: unquote(var(rel)).unquote(String.to_atom("#{rel[:name]}_id")) == ^id,
-                  order_by: [asc: unquote(var(rel)).inserted_at],
-                  preload: unquote(preloads)
+                from(
+                  unquote(var(rel)) in unquote(schema_module),
+                  unquote(query_opts)
                 )
+                |> where([q], q.unquote(String.to_atom("#{rel[:name]}_id")) == ^id)
 
               unquote(
                 with_entity_scope(
