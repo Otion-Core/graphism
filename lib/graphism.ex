@@ -2206,7 +2206,7 @@ defmodule Graphism do
   end
 
   defp entity_list_query_opts(e, schema) do
-    preloads = parent_preloads(e, schema)
+    preloads = parent_preloads(e, schema) ++ child_preloads(e, schema)
 
     opts = [
       preload: preloads
