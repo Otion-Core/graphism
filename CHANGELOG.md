@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.3.4 (Feb 13rd, 2022)
+
 * Entity sort - [#67](https://github.com/Gravity-Core/graphism/pull/67)
 
 ## 0.3.3 (Feb 1st, 2022)
