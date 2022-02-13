@@ -257,6 +257,23 @@ entity :node do
 end
 ```
 
+### Sorting results
+
+It is possible to customize the default ordering of results when doing list queries:
+
+```elixir
+entity :post, sort: [desc: :inserted_at] do
+...
+end 
+```
+
+The `:sort` options can take the following values:
+
+* `:none`, meaning no default ordering should be applied.
+* an Ecto compatible keyword list expression, eg `[desc: :inserted_at]`
+
+If not specified, then `[asc: :inserted_at]` will be used by default.
+
 ### Standard actions
 
 Graphism provides with five basic standard actions:
