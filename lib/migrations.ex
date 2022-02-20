@@ -797,56 +797,15 @@ defmodule Graphism.Migrations do
           [
             {:__aliases__, _, _},
             [
-              do:
-                {:__block__, [],
-                 [
-                   {:use, _, [{:__aliases__, _, [:Ecto, :Migration]}]},
-                   {:def, _,
-                    [
-                      {:up, _, nil},
-                      [
-                        do: {:__block__, [], up}
-                      ]
-                    ]},
-                   {:def, _,
-                    [
-                      {:down, _, nil},
-                      [do: _]
-                    ]}
-                 ]}
+              do: {:__block__, [], items}
             ]
           ]}
        ) do
-    Enum.map(up, &parse_up(&1))
-    |> Enum.reject(fn item -> item == [] end)
-  end
-
-  defp parse_migration(
-         {:defmodule, _,
-          [
-            {:__aliases__, _, _},
-            [
-              do:
-                {:__block__, [],
-                 [
-                   {:use, _, [{:__aliases__, _, [:Ecto, :Migration]}]},
-                   {:def, _,
-                    [
-                      {:up, _, nil},
-                      [
-                        do: up
-                      ]
-                    ]},
-                   {:def, _,
-                    [
-                      {:down, _, nil},
-                      [do: _]
-                    ]}
-                 ]}
-            ]
-          ]}
-       ) do
-    [parse_up(up)]
+    items
+    |> Enum.map(&up_migration/1)
+    |> Enum.reject(&is_nil/1)
+    |> List.flatten()
+    |> Enum.map(&parse_up(&1))
     |> Enum.reject(fn item -> item == [] end)
   end
 
@@ -854,6 +813,30 @@ defmodule Graphism.Migrations do
     Logger.warn("Unable to parse migration #{Enum.join(migration, ".")}")
     []
   end
+
+  defp up_migration(
+         {:def, _,
+          [
+            {:up, _, nil},
+            [
+              do: {:__block__, [], up}
+            ]
+          ]}
+       ),
+       do: up
+
+  defp up_migration(
+         {:def, _,
+          [
+            {:up, _, nil},
+            [
+              do: up
+            ]
+          ]}
+       ),
+       do: up
+
+  defp up_migration(_), do: nil
 
   defp parse_up(
          {action, _,

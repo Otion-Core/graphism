@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+* More robust migrations parsing - [#69](https://github.com/Gravity-Core/graphism/pull/69)
+
 ## 0.3.4 (Feb 13rd, 2022)
 
 * Entity sort - [#67](https://github.com/Gravity-Core/graphism/pull/67)
