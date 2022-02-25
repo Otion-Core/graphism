@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+* Before/After hooks when deleting - [#71](https://github.com/Gravity-Core/graphism/pull/71)
+
 ## 0.3.5 (Feb 20th, 2022)
 
 * More robust migrations parsing - [#69](https://github.com/Gravity-Core/graphism/pull/69)

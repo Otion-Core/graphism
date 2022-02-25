@@ -2668,13 +2668,37 @@ defmodule Graphism do
     [fun | funs]
   end
 
-  defp with_api_delete_fun(funs, _e, schema_module, repo_module, _schema) do
-    [
+  defp with_api_delete_fun(funs, e, schema_module, repo_module, _schema) do
+    before_hooks = hooks(e, :before, :delete)
+    after_hooks = hooks(e, :after, :delete)
+
+    delete =
       quote do
-        def delete(%unquote(schema_module){} = e) do
-          e
+        {:ok, attrs} <-
+          attrs
           |> unquote(schema_module).delete_changeset()
           |> unquote(repo_module).delete()
+      end
+
+    [
+      quote do
+        def delete(%unquote(schema_module){} = attrs) do
+          unquote(repo_module).transaction(fn ->
+            with unquote_splicing(
+                   [
+                     before_hooks,
+                     delete,
+                     after_hooks
+                   ]
+                   |> flat()
+                   |> without_nils()
+                 ) do
+              attrs
+            else
+              {:error, e} ->
+                unquote(repo_module).rollback(e)
+            end
+          end)
         end
       end
       | funs
