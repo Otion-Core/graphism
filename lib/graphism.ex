@@ -709,6 +709,9 @@ defmodule Graphism do
   defmacro upload(_name, _opts \\ []) do
   end
 
+  defmacro immutable(_name, _opts \\ []) do
+  end
+
   defp without_nils(enum) do
     Enum.reject(enum, fn item -> item == nil end)
   end
@@ -3204,6 +3207,10 @@ defmodule Graphism do
     Enum.member?(attr[:opts][:modifiers] || [], :unique)
   end
 
+  defp immutable?(attr) do
+    Enum.member?(attr[:opts][:modifiers] || [], :immutable)
+  end
+
   def graphql_resolver(e, action) do
     quote do
       &(unquote(e[:resolver_module]).unquote(action) / 3)
@@ -3333,7 +3340,7 @@ defmodule Graphism do
           ] ++
             (e[:attributes]
              |> Enum.reject(fn attr ->
-               attr[:name] == :id || computed?(attr)
+               attr[:name] == :id || computed?(attr) || immutable?(attr)
              end)
              |> Enum.map(fn attr ->
                kind = attr_graphql_type(attr)
@@ -3347,7 +3354,7 @@ defmodule Graphism do
              end)) ++
             (e[:relations]
              |> Enum.filter(fn rel -> :belongs_to == rel[:kind] end)
-             |> Enum.reject(&computed?(&1))
+             |> Enum.reject(&(computed?(&1) || immutable?(&1)))
              |> Enum.map(fn rel ->
                quote do
                  arg(unquote(rel[:name]), :id)
@@ -3493,6 +3500,13 @@ defmodule Graphism do
     attribute({:optional, nil, [opts]})
   end
 
+  defp attribute({:immutable, _, [opts]}) do
+    with attr when attr != nil <- attribute(opts) do
+      modifiers = [:immutable | get_in(attr, [:opts, :modifiers]) || []]
+      put_in(attr, [:opts, :modifiers], modifiers)
+    end
+  end
+
   defp attribute({:optional, _, [{:belongs_to, _, _}]}), do: nil
 
   defp attribute({:optional, _, [opts]}) do
@@ -3578,6 +3592,13 @@ defmodule Graphism do
     rel = relation_from(opts)
     modifiers = get_in(rel, [:opts, :modifiers]) || []
     put_in(rel, [:opts, :modifiers], [:optional | modifiers])
+  end
+
+  defp relation_from({:immutable, _, [opts]}) do
+    with rel when rel != nil <- relation_from(opts) do
+      modifiers = get_in(rel, [:opts, :modifiers]) || []
+      put_in(rel, [:opts, :modifiers], [:immutable | modifiers])
+    end
   end
 
   defp relation_from({:has_many, _, [name]}),
