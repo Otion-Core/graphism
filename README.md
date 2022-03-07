@@ -274,6 +274,18 @@ The `:sort` options can take the following values:
 
 If not specified, then `[asc: :inserted_at]` will be used by default.
 
+### Immutable fields
+
+Attributes or relations can be made immutable. This means once they are initialized, they cannot be modified:
+
+```elixir
+entity :file do
+  ...
+  immutable(upload(:content))
+  ...
+end
+```
+
 ### Standard actions
 
 Graphism provides with five basic standard actions:

@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 0.3.7 (March 7th, 2022)
+
+* Immutable fields - [#74](https://github.com/Gravity-Core/graphism/pull/74)
+
 ## 0.3.6 (Feb 25th, 2022)
 
 * Before/After hooks when deleting - [#72](https://github.com/Gravity-Core/graphism/pull/72)
