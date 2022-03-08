@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.3.8 (March 8th, 2022)
+
 * Non empty fields - [#75](https://github.com/Gravity-Core/graphism/pull/75)
 
 ## 0.3.7 (March 7th, 2022)
