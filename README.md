@@ -286,6 +286,18 @@ entity :file do
 end
 ```
 
+### Non empty fields
+
+Sometimes we need fields that are optional at the api level, while ensuring non empty values are stored in the database:
+
+```elixir
+entity :file do
+  ...
+  optional(non_empty(string(:name))
+  ...
+end
+```
+
 ### Standard actions
 
 Graphism provides with five basic standard actions:

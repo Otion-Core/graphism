@@ -712,6 +712,9 @@ defmodule Graphism do
   defmacro immutable(_name, _opts \\ []) do
   end
 
+  defmacro non_empty(_name, _opts \\ []) do
+  end
+
   defp without_nils(enum) do
     Enum.reject(enum, fn item -> item == nil end)
   end
@@ -1021,7 +1024,7 @@ defmodule Graphism do
 
         @required_fields unquote(
                            (e[:attributes]
-                            |> Enum.reject(&(optional?(&1) || virtual?(&1)))
+                            |> Enum.reject(&((optional?(&1) && !non_empty?(&1)) || virtual?(&1)))
                             |> Enum.map(fn attr ->
                               attr[:name]
                             end)) ++
@@ -3211,6 +3214,10 @@ defmodule Graphism do
     Enum.member?(attr[:opts][:modifiers] || [], :immutable)
   end
 
+  defp non_empty?(attr) do
+    Enum.member?(attr[:opts][:modifiers] || [], :non_empty)
+  end
+
   def graphql_resolver(e, action) do
     quote do
       &(unquote(e[:resolver_module]).unquote(action) / 3)
@@ -3507,6 +3514,13 @@ defmodule Graphism do
     end
   end
 
+  defp attribute({:non_empty, _, [opts]}) do
+    with attr when attr != nil <- attribute(opts) do
+      modifiers = [:non_empty | get_in(attr, [:opts, :modifiers]) || []]
+      put_in(attr, [:opts, :modifiers], modifiers)
+    end
+  end
+
   defp attribute({:optional, _, [{:belongs_to, _, _}]}), do: nil
 
   defp attribute({:optional, _, [opts]}) do
@@ -3598,6 +3612,13 @@ defmodule Graphism do
     with rel when rel != nil <- relation_from(opts) do
       modifiers = get_in(rel, [:opts, :modifiers]) || []
       put_in(rel, [:opts, :modifiers], [:immutable | modifiers])
+    end
+  end
+
+  defp relation_from({:non_empty, _, [opts]}) do
+    with rel when rel != nil <- relation_from(opts) do
+      modifiers = get_in(rel, [:opts, :modifiers]) || []
+      put_in(rel, [:opts, :modifiers], [:non_empty | modifiers])
     end
   end
 
