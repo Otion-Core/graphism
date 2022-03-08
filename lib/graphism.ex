@@ -2760,7 +2760,7 @@ defmodule Graphism do
   end
 
   defp graphql_nullable_type?(attr) do
-    optional?(attr) || (with_default?(attr) && !enum?(attr) && !boolean?(attr))
+    (optional?(attr) && !non_empty?(attr)) || (with_default?(attr) && !enum?(attr) && !boolean?(attr))
   end
 
   defp unit_graphql_object() do
