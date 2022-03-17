@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+* Virtual field syntax sugar - [#79](https://github.com/Gravity-Core/graphism/pull/79)
+
 ## 0.3.9 (March 17th, 2022)
 
 * Field validation improvements - [#77](https://github.com/Gravity-Core/graphism/pull/77)
