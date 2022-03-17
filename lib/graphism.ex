@@ -1074,6 +1074,18 @@ defmodule Graphism do
             |> unique_constraint(:id, name: unquote("#{e[:table]}_pkey"))
 
           unquote_splicing(
+            e[:attributes]
+            |> Enum.filter(fn attr -> attr[:kind] == :string end)
+            |> Enum.map(fn attr ->
+              quote do
+                changes =
+                  changes
+                  |> validate_length(unquote(attr[:name]), max: 255, message: "should be at most 255 characters")
+              end
+            end)
+          )
+
+          unquote_splicing(
             Enum.map(indices, fn index ->
               field_name = (index.columns -- scope_columns) |> Enum.join("_") |> String.to_atom()
 
@@ -1816,6 +1828,9 @@ defmodule Graphism do
                             nil ->
                               {:ok, unquote(var(e)).unquote(rel[:name])}
 
+                            "" ->
+                              {:ok, unquote(var(e)).unquote(rel[:name])}
+
                             key ->
                               unquote(target[:api_module]).unquote(lookup_fun)(key)
                           end
@@ -1831,6 +1846,9 @@ defmodule Graphism do
                     quote do
                       case Map.get(unquote(var(:args)), unquote(arg_name), nil) do
                         nil ->
+                          {:ok, nil}
+
+                        "" ->
                           {:ok, nil}
 
                         key ->
