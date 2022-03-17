@@ -715,6 +715,9 @@ defmodule Graphism do
   defmacro non_empty(_name, _opts \\ []) do
   end
 
+  defmacro virtual(_name, _opts \\ []) do
+  end
+
   defp without_nils(enum) do
     Enum.reject(enum, fn item -> item == nil end)
   end
@@ -3535,6 +3538,13 @@ defmodule Graphism do
   defp attribute({:non_empty, _, [opts]}) do
     with attr when attr != nil <- attribute(opts) do
       modifiers = [:non_empty | get_in(attr, [:opts, :modifiers]) || []]
+      put_in(attr, [:opts, :modifiers], modifiers)
+    end
+  end
+
+  defp attribute({:virtual, _, [opts]}) do
+    with attr when attr != nil <- attribute(opts) do
+      modifiers = [:virtual | get_in(attr, [:opts, :modifiers]) || []]
       put_in(attr, [:opts, :modifiers], modifiers)
     end
   end
