@@ -2,8 +2,9 @@
 
 ## Unreleased
 
+## 0.3.9 (March 17th, 2022)
 
-* Field validation improvements - [#77](https://github.com/Gravity-Core/graphism/pull/76)
+* Field validation improvements - [#77](https://github.com/Gravity-Core/graphism/pull/77)
 
 ## 0.3.8 (March 8th, 2022)
 
