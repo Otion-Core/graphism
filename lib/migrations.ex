@@ -29,6 +29,7 @@ defmodule Graphism.Migrations do
          |> Enum.sort()
          |> Enum.map(&File.read!(&1)))
       |> Enum.map(&Code.string_to_quoted!(&1))
+      |> Enum.reject(&skip_migration?/1)
 
     last_migration_version = last_migration_version(existing_migrations)
 
@@ -45,6 +46,30 @@ defmodule Graphism.Migrations do
       )
 
     write_migration(missing_migrations, last_migration_version + 1, opts)
+  end
+
+  defp skip_migration?(code) do
+    code
+    |> graphism_opts()
+    |> Enum.member?(:skip)
+  end
+
+  defp graphism_opts(
+         {:defmodule, _,
+          [
+            {:__aliases__, _, _},
+            [
+              do: {:__block__, [], blocks}
+            ]
+          ]}
+       ) do
+    blocks
+    |> Enum.map(fn
+      {:@, _, [{:graphism, _, [opts]}]} -> opts
+      _ -> nil
+    end)
+    |> without_nils()
+    |> List.flatten()
   end
 
   defp without_nils(enum) do
@@ -517,6 +542,9 @@ defmodule Graphism.Migrations do
         put_in(col, [:opts, :null], true)
 
       {nil, false} ->
+        put_in(col, [:opts, :null], false)
+
+      {true, false} ->
         put_in(col, [:opts, :null], false)
 
       _ ->
