@@ -2,7 +2,8 @@
 
 ## Unreleased
 
-* Virtual field syntax sugar - [#79](https://github.com/Gravity-Core/graphism/pull/79)
+
+* Skippable migrations - [#80](https://github.com/Gravity-Core/graphism/pull/80)
 
 ## 0.3.9 (March 17th, 2022)
 

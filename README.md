@@ -426,3 +426,19 @@ Custom Absinthe middlewares can be also be plugged:
 use Graphism, repo: ..., middleware: [My.Middleware]
 ```
 
+### Skippable migrations
+
+Sometimes we need to write our own custom migrations. It is possible to tell Graphism to ignore these
+by setting the `@graphism` module attribute:
+
+```elixir
+defmodule My.Custom.Migration do
+  use Ecto.Migration
+
+  @graphism [:skip] # add the :skip option
+
+  def up do
+    execute("...")
+  end
+end
+```
