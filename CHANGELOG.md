@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+* Sorting and paginating queries - [#82](https://github.com/Gravity-Core/graphism/pull/82)
+
 ## 0.3.10 (April 2nd, 2022)
 
 * Skippable migrations - [#80](https://github.com/Gravity-Core/graphism/pull/80)
