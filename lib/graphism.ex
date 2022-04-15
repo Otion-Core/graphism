@@ -352,8 +352,10 @@ defmodule Graphism do
           )
         end)
 
+      asc_desc = {:asc_desc, [:asc, :desc]}
+
       enum_types =
-        Enum.map(enums, fn {enum, value} ->
+        Enum.map([asc_desc | enums], fn {enum, value} ->
           graphql_enum(enum, value)
         end)
 
@@ -948,7 +950,7 @@ defmodule Graphism do
 
   defp schema_module(e, schema, _opts) do
     indices = Migrations.indices_from_attributes(e) ++ Migrations.indices_from_keys(e)
-
+    stored_attributes = Enum.reject(e[:attributes], fn attr -> attr[:name] == :id or virtual?(attr) end)
     scope_columns = Enum.map(e[:opts][:scope] || [], fn col -> String.to_atom("#{col}_id") end)
 
     quote do
@@ -977,9 +979,7 @@ defmodule Graphism do
 
         schema unquote("#{e[:plural]}") do
           unquote_splicing(
-            e[:attributes]
-            |> Enum.reject(fn attr -> attr[:name] == :id or virtual?(attr) end)
-            |> Enum.map(fn attr ->
+            Enum.map(stored_attributes, fn attr ->
               kind = ecto_datatype(attr[:kind])
 
               case attr[:opts][:default] do
@@ -1068,6 +1068,30 @@ defmodule Graphism do
         def required_fields, do: @required_fields
         def optional_fields, do: @optional_fields
         def computed_fields, do: @computed_fields
+
+        unquote_splicing(
+          (names(stored_attributes) ++ [:inserted_at, :updated_at])
+          |> Enum.map(fn name ->
+            quote do
+              def column_name(unquote(Inflex.camelize(name, :lower))), do: {:ok, unquote(name)}
+            end
+          end)
+        )
+
+        unquote_splicing(
+          e
+          |> parent_relations()
+          |> names()
+          |> Enum.map(fn name ->
+            column_name = String.to_atom("#{name}_id")
+
+            quote do
+              def column_name(unquote(Inflex.camelize(name, :lower))), do: {:ok, unquote(column_name)}
+            end
+          end)
+        )
+
+        def column_name(_), do: {:error, :unknown_field}
 
         def changeset(e, attrs) do
           changes =
@@ -1328,6 +1352,21 @@ defmodule Graphism do
     end
 
     rel
+  end
+
+  defp with_resolver_pagination_fun(funs) do
+    [
+      quote do
+        @pagination_fields [:offset, :limit, :sort_by, :sort_direction]
+
+        def context_with_pagination(args, context) do
+          Enum.reduce(@pagination_fields, context, fn field, acc ->
+            Map.put(acc, field, Map.get(args, field, nil))
+          end)
+        end
+      end
+      | funs
+    ]
   end
 
   defp with_resolver_auth_funs(funs, e, schema, hooks, context_builder) do
@@ -1614,8 +1653,9 @@ defmodule Graphism do
       def list(_, args, %{context: context}) do
         unquote(simple_auth_context(e, :list))
 
-        with true <- should_list?(args, context) do
-          {:ok, unquote(api_module).list(context)}
+        with true <- should_list?(args, context),
+             context <- context_with_pagination(args, context) do
+          unquote(api_module).list(context)
         end
       end
     end
@@ -1635,12 +1675,12 @@ defmodule Graphism do
 
           with {:ok, unquote(var(rel))} <-
                  unquote(target[:api_module]).get_by_id(args.unquote(rel[:name])),
-               true <- unquote(auth_fun_name)(unquote(var(rel)), context) do
-            {:ok,
-             unquote(api_module).unquote(fun_name)(
-               unquote(var(rel)).id,
-               context
-             )}
+               true <- unquote(auth_fun_name)(unquote(var(rel)), context),
+               context <- context_with_pagination(args, context) do
+            unquote(api_module).unquote(fun_name)(
+              unquote(var(rel)).id,
+              context
+            )
           end
         end
       end
@@ -2151,6 +2191,7 @@ defmodule Graphism do
 
     resolver_funs =
       []
+      |> with_resolver_pagination_fun()
       |> with_resolver_auth_funs(e, schema, hooks, context_builder)
       |> with_resolver_inlined_relations_funs(e, schema, api_module)
       |> with_resolver_list_funs(e, schema, api_module)
@@ -2176,6 +2217,7 @@ defmodule Graphism do
 
         api_funs =
           []
+          |> with_optional_query_pagination_fun(schema_module)
           |> with_api_list_funs(e, schema_module, repo_module, schema, hooks)
           |> with_api_read_funs(e, schema_module, repo_module, schema)
           |> with_api_create_fun(e, schema_module, repo_module, schema)
@@ -2188,6 +2230,10 @@ defmodule Graphism do
         quote do
           defmodule unquote(e[:api_module]) do
             import Ecto.Query
+
+            @default_offset 0
+            @default_limit 20
+
             (unquote_splicing(api_funs))
           end
         end
@@ -2214,16 +2260,6 @@ defmodule Graphism do
     end
   end
 
-  defp with_entity_scope(e, action, fun, hooks) do
-    opts = action_for(e, action)
-    mod = scope_hook!(e, opts, action, hooks)
-
-    quote do
-      query = unquote(mod).scope(query, context)
-      unquote(fun.())
-    end
-  end
-
   defp entity_sort(e) do
     case e[:opts][:sort] do
       :none -> nil
@@ -2245,8 +2281,68 @@ defmodule Graphism do
     end
   end
 
+  defp with_optional_query_pagination_fun(funs, schema_module) do
+    [
+      quote do
+        defp maybe_paginate(query, context) do
+          with {:ok, query} <- maybe_sort(query, context) do
+            maybe_limit(query, context)
+          end
+        end
+
+        defp maybe_sort(query, context) do
+          sort_by = Map.get(context, :sort_by, nil)
+          sort_direction = Map.get(context, :sort_direction, :asc)
+
+          maybe_sort(query, sort_by, sort_direction)
+        end
+
+        defp cast_sort_direction("asc"), do: {:ok, :asc}
+        defp cast_sort_direction("desc"), do: {:ok, :desc}
+        defp cast_sort_direction(:asc), do: {:ok, :asc}
+        defp cast_sort_direction(:desc), do: {:ok, :desc}
+
+        defp cast_sort_direction(other) do
+          IO.inspect(other)
+          {:error, :invalid_sort_direction}
+        end
+
+        defp maybe_sort(query, nil, _), do: {:ok, query}
+
+        defp maybe_sort(query, field, direction) do
+          with {:ok, sort_direction} <- cast_sort_direction(direction),
+               {:ok, sort_column} <- unquote(schema_module).column_name(field) do
+            opts = [{sort_direction, sort_column}]
+            {:ok, from(i in query, order_by: ^opts)}
+          end
+        end
+
+        defp maybe_limit(query, context) do
+          limit = Map.get(context, :limit, nil)
+          offset = Map.get(context, :offset, nil)
+
+          maybe_limit(query, limit, offset)
+        end
+
+        defp maybe_limit(query, nil, _), do: {:ok, query}
+        defp maybe_limit(query, _, nil), do: {:ok, query}
+
+        defp maybe_limit(query, limit, offset) do
+          {:ok,
+           query
+           |> limit(^limit)
+           |> offset(^offset)}
+        end
+      end
+      | funs
+    ]
+  end
+
   defp with_api_list_funs(funs, e, schema_module, repo_module, schema, hooks) do
     query_opts = entity_list_query_opts(e, schema)
+
+    action_opts = action_for(e, :list)
+    scope_mod = scope_hook!(e, action_opts, :list, hooks)
 
     [
       quote do
@@ -2257,18 +2353,10 @@ defmodule Graphism do
               unquote(query_opts)
             )
 
-          unquote(
-            with_entity_scope(
-              e,
-              :list,
-              fn ->
-                quote do
-                  unquote(repo_module).all(query)
-                end
-              end,
-              hooks
-            )
-          )
+          with {:ok, query} <- maybe_paginate(query, context),
+               query <- unquote(scope_mod).scope(query, context) do
+            {:ok, unquote(repo_module).all(query)}
+          end
         end
       end
       | e[:relations]
@@ -2283,18 +2371,10 @@ defmodule Graphism do
                 )
                 |> where([q], q.unquote(String.to_atom("#{rel[:name]}_id")) == ^id)
 
-              unquote(
-                with_entity_scope(
-                  e,
-                  :list,
-                  fn ->
-                    quote do
-                      unquote(repo_module).all(query)
-                    end
-                  end,
-                  hooks
-                )
-              )
+              with {:ok, query} <- maybe_paginate(query, context),
+                   query <- unquote(scope_mod).scope(query, context) do
+                {:ok, unquote(repo_module).all(query)}
+              end
             end
           end
         end)
@@ -3033,6 +3113,10 @@ defmodule Graphism do
     quote do
       @desc "List all " <> unquote("#{e[:plural_display_name]}")
       field :all, list_of(unquote(e[:name])) do
+        arg(:limit, :integer)
+        arg(:offset, :integer)
+        arg(:sort_by, :string)
+        arg(:sort_direction, :asc_desc)
         resolve(&unquote(e[:resolver_module]).list/3)
       end
     end
@@ -3136,7 +3220,10 @@ defmodule Graphism do
         field unquote(String.to_atom("by_#{rel[:name]}")),
               list_of(unquote(e[:name])) do
           arg(unquote(rel[:name]), non_null(:id))
-
+          arg(:limit, :integer)
+          arg(:offset, :integer)
+          arg(:sort_by, :string)
+          arg(:sort_direction, :asc_desc)
           resolve(&(unquote(e[:resolver_module]).unquote(String.to_atom("list_by_#{rel[:name]}")) / 3))
         end
       end

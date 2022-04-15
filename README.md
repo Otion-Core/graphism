@@ -442,3 +442,32 @@ defmodule My.Custom.Migration do
   end
 end
 ```
+
+### GraphQL pagination and sorting
+
+Graphism will build all your queries with optional sorting and pagination. 
+
+Based on this simple entity:
+
+```elixir
+entity :contact do
+  string(:first_name)
+  string(:last_name)
+  action(:list)
+end
+```
+
+You can query all your contacts by chunks:
+
+```
+query {
+  contacts {
+    all(sortBy: "lastName", sortDirection: ASC, limit: 20, offset: 40) {
+      firstName,
+      lastName
+    }
+  }
+}
+```
+
+
