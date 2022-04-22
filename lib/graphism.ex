@@ -375,9 +375,19 @@ defmodule Graphism do
           end
         end
 
+      aggregate_graphql_type =
+        quote do
+          object :aggregate do
+            field :count, :integer
+          end
+        end
+
       entities_queries =
         Enum.flat_map(schema, fn e ->
-          [single_graphql_queries(e, schema), multiple_graphql_queries(e, schema)]
+          [
+            single_graphql_queries(e, schema),
+            multiple_graphql_queries(e, schema)
+          ]
         end)
         |> without_nils()
 
@@ -476,6 +486,7 @@ defmodule Graphism do
         input_types,
         objects,
         self_resolver,
+        aggregate_graphql_type,
         entities_queries,
         queries,
         entities_mutations,
@@ -1091,6 +1102,8 @@ defmodule Graphism do
           end)
         )
 
+        def column_name(:inserted_at), do: {:ok, :inserted_at}
+        def column_name(:updated_at), do: {:ok, :updated_at}
         def column_name(_), do: {:error, :unknown_field}
 
         def changeset(e, attrs) do
@@ -1694,6 +1707,50 @@ defmodule Graphism do
     end)
   end
 
+  defp resolver_aggregate_fun(e, _schema, api_module) do
+    quote do
+      def aggregate(_, args, %{context: context}) do
+        unquote(simple_auth_context(e, :list))
+
+        with true <- should_list?(args, context) do
+          unquote(api_module).aggregate(context)
+        end
+      end
+    end
+  end
+
+  defp resolver_aggregate_by_relation_funs(e, schema, api_module) do
+    e
+    |> parent_relations()
+    |> Enum.map(fn rel ->
+      target = find_entity!(schema, rel[:target])
+      fun_name = String.to_atom("aggregate_by_#{rel[:name]}")
+      auth_fun_name = String.to_atom("should_list_by_#{rel[:name]}?")
+
+      quote do
+        def unquote(fun_name)(_, args, %{context: context}) do
+          unquote(simple_auth_context(e, :list))
+
+          with {:ok, unquote(var(rel))} <-
+                 unquote(target[:api_module]).get_by_id(args.unquote(rel[:name])),
+               true <- unquote(auth_fun_name)(unquote(var(rel)), context) do
+            unquote(api_module).unquote(fun_name)(
+              unquote(var(rel)).id,
+              context
+            )
+          end
+        end
+      end
+    end)
+  end
+
+  defp with_resolver_aggregate_funs(funs, e, schema, api_module) do
+    with_entity_funs(funs, e, :list, fn ->
+      [resolver_aggregate_fun(e, schema, api_module)] ++
+        resolver_aggregate_by_relation_funs(e, schema, api_module)
+    end)
+  end
+
   defp inlined_children_for_action(e, action) do
     e[:relations]
     |> Enum.filter(fn rel ->
@@ -2195,6 +2252,7 @@ defmodule Graphism do
       |> with_resolver_auth_funs(e, schema, hooks, context_builder)
       |> with_resolver_inlined_relations_funs(e, schema, api_module)
       |> with_resolver_list_funs(e, schema, api_module)
+      |> with_resolver_aggregate_funs(e, schema, api_module)
       |> with_resolver_read_funs(e, schema, api_module)
       |> with_resolver_create_fun(e, schema, api_module, opts)
       |> with_resolver_update_fun(e, schema, api_module, opts)
@@ -2217,8 +2275,9 @@ defmodule Graphism do
 
         api_funs =
           []
-          |> with_optional_query_pagination_fun(schema_module)
+          |> with_optional_query_pagination_fun(e, schema_module)
           |> with_api_list_funs(e, schema_module, repo_module, schema, hooks)
+          |> with_api_aggregate_funs(e, schema_module, repo_module, schema, hooks)
           |> with_api_read_funs(e, schema_module, repo_module, schema)
           |> with_api_create_fun(e, schema_module, repo_module, schema)
           |> with_api_batch_create_fun(e, schema_module, repo_module, schema)
@@ -2260,28 +2319,26 @@ defmodule Graphism do
     end
   end
 
-  defp entity_sort(e) do
-    case e[:opts][:sort] do
-      :none -> nil
-      nil -> [asc: :inserted_at]
-      other -> other
-    end
-  end
-
   defp entity_list_query_opts(e, schema) do
     preloads = parent_preloads(e, schema) ++ child_preloads(e, schema)
 
-    opts = [
+    [
       preload: preloads
     ]
-
-    case entity_sort(e) do
-      nil -> opts
-      sort -> Keyword.put(opts, :order_by, sort)
-    end
   end
 
-  defp with_optional_query_pagination_fun(funs, schema_module) do
+  defp entity_aggregate_query_opts(_e, _schema) do
+    []
+  end
+
+  defp with_optional_query_pagination_fun(e, funs, schema_module) do
+    {default_sort_by, default_sort_direction} =
+      case e[:opts][:sort] do
+        :none -> {nil, nil}
+        nil -> {:inserted_at, :asc}
+        other -> other
+      end
+
     [
       quote do
         defp maybe_paginate(query, context) do
@@ -2291,8 +2348,8 @@ defmodule Graphism do
         end
 
         defp maybe_sort(query, context) do
-          sort_by = Map.get(context, :sort_by, nil)
-          sort_direction = Map.get(context, :sort_direction, :asc)
+          sort_by = Map.get(context, :sort_by, unquote(default_sort_by))
+          sort_direction = Map.get(context, :sort_direction, unquote(default_sort_direction))
 
           maybe_sort(query, sort_by, sort_direction)
         end
@@ -2374,6 +2431,49 @@ defmodule Graphism do
               with {:ok, query} <- maybe_paginate(query, context),
                    query <- unquote(scope_mod).scope(query, context) do
                 {:ok, unquote(repo_module).all(query)}
+              end
+            end
+          end
+        end)
+    ] ++ funs
+  end
+
+  defp with_api_aggregate_funs(funs, e, schema_module, repo_module, schema, hooks) do
+    query_opts = entity_aggregate_query_opts(e, schema)
+
+    action_opts = action_for(e, :list)
+    scope_mod = scope_hook!(e, action_opts, :list, hooks)
+
+    [
+      quote do
+        def aggregate(context \\ %{}) do
+          query =
+            from(
+              unquote(var(e)) in unquote(schema_module),
+              unquote(query_opts)
+            )
+
+          with query <- unquote(scope_mod).scope(query, context) do
+            {:ok, %{count: unquote(repo_module).aggregate(query, :count)}}
+          end
+        end
+      end
+      | e[:relations]
+        |> Enum.filter(fn rel -> rel[:kind] == :belongs_to end)
+        |> Enum.map(fn rel ->
+          name = String.to_atom("aggregate_by_#{rel[:name]}")
+
+          quote do
+            def unquote(name)(id, context \\ %{}) do
+              query =
+                from(
+                  unquote(var(rel)) in unquote(schema_module),
+                  unquote(query_opts)
+                )
+                |> where([q], q.unquote(String.to_atom("#{rel[:name]}_id")) == ^id)
+
+              with query <- unquote(scope_mod).scope(query, context) do
+                {:ok, %{count: unquote(repo_module).aggregate(query, :count)}}
               end
             end
           end
@@ -3098,7 +3198,9 @@ defmodule Graphism do
             (unquote_splicing(
                List.flatten([
                  graphql_query_list_all(e, schema),
-                 graphql_query_find_by_parent_types(e, schema)
+                 graphql_query_aggregate_all(e, schema),
+                 graphql_query_find_by_parent_queries(e, schema),
+                 graphql_query_aggregate_by_parent_queries(e, schema)
                ])
              ))
           end
@@ -3118,6 +3220,15 @@ defmodule Graphism do
         arg(:sort_by, :string)
         arg(:sort_direction, :asc_desc)
         resolve(&unquote(e[:resolver_module]).list/3)
+      end
+    end
+  end
+
+  defp graphql_query_aggregate_all(e, _schema) do
+    quote do
+      @desc "Aggregate all " <> unquote("#{e[:plural_display_name]}")
+      field :aggregate, non_null(:aggregate) do
+        resolve(&unquote(e[:resolver_module]).aggregate/3)
       end
     end
   end
@@ -3209,7 +3320,7 @@ defmodule Graphism do
     end)
   end
 
-  defp graphql_query_find_by_parent_types(e, _schema) do
+  defp graphql_query_find_by_parent_queries(e, _schema) do
     e[:relations]
     |> Enum.filter(fn rel -> :belongs_to == rel[:kind] end)
     |> Enum.map(fn rel ->
@@ -3225,6 +3336,23 @@ defmodule Graphism do
           arg(:sort_by, :string)
           arg(:sort_direction, :asc_desc)
           resolve(&(unquote(e[:resolver_module]).unquote(String.to_atom("list_by_#{rel[:name]}")) / 3))
+        end
+      end
+    end)
+  end
+
+  defp graphql_query_aggregate_by_parent_queries(e, _schema) do
+    e[:relations]
+    |> Enum.filter(fn rel -> :belongs_to == rel[:kind] end)
+    |> Enum.map(fn rel ->
+      name = String.to_atom("aggregate_by_#{rel[:name]}")
+      description = "Aggregate all #{e[:plural_display_name]} by their parent #{rel[:target]}"
+
+      quote do
+        @desc unquote(description)
+        field unquote(name), non_null(:aggregate) do
+          arg(unquote(rel[:name]), non_null(:id))
+          resolve(&(unquote(e[:resolver_module]).unquote(name) / 3))
         end
       end
     end)
