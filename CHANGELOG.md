@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+# 0.4.1 (April 22th, 2022)
 
 * Aggregate queries - [#84](https://github.com/Gravity-Core/graphism/pull/84)
 
