@@ -1707,9 +1707,9 @@ defmodule Graphism do
     end)
   end
 
-  defp resolver_aggregate_fun(e, _schema, api_module) do
+  defp resolver_aggregate_all_fun(e, _schema, api_module) do
     quote do
-      def aggregate(_, args, %{context: context}) do
+      def aggregate_all(_, args, %{context: context}) do
         unquote(simple_auth_context(e, :list))
 
         with true <- should_list?(args, context) do
@@ -1746,7 +1746,7 @@ defmodule Graphism do
 
   defp with_resolver_aggregate_funs(funs, e, schema, api_module) do
     with_entity_funs(funs, e, :list, fn ->
-      [resolver_aggregate_fun(e, schema, api_module)] ++
+      [resolver_aggregate_all_fun(e, schema, api_module)] ++
         resolver_aggregate_by_relation_funs(e, schema, api_module)
     end)
   end
@@ -3227,8 +3227,8 @@ defmodule Graphism do
   defp graphql_query_aggregate_all(e, _schema) do
     quote do
       @desc "Aggregate all " <> unquote("#{e[:plural_display_name]}")
-      field :aggregate, non_null(:aggregate) do
-        resolve(&unquote(e[:resolver_module]).aggregate/3)
+      field :aggregate_all, non_null(:aggregate) do
+        resolve(&unquote(e[:resolver_module]).aggregate_all/3)
       end
     end
   end
