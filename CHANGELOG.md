@@ -5,6 +5,8 @@
 # 0.4.1 (April 22th, 2022)
 
 * Aggregate queries - [#84](https://github.com/Gravity-Core/graphism/pull/84)
+* Use aggregateAll instead of aggregate - [#85](https://github.com/Gravity-Core/graphism/pull/85)
+
 
 ## 0.4.0 (April 15th, 2022)
 

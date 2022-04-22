@@ -478,7 +478,7 @@ In addition to listing entities, it is also possible to aggregate (eg. count) th
 ````
 query {
   contacts {
-    aggregate {
+    aggregateAll {
       count
     }
   }
