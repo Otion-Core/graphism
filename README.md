@@ -443,7 +443,7 @@ defmodule My.Custom.Migration do
 end
 ```
 
-### GraphQL pagination and sorting
+### Pagination and sorting
 
 Graphism will build all your queries with optional sorting and pagination. 
 
@@ -471,3 +471,16 @@ query {
 ```
 
 
+### Aggregate queries
+
+In addition to listing entities, it is also possible to aggregate (eg. count) them. 
+
+````
+query {
+  contacts {
+    aggregate {
+      count
+    }
+  }
+}
+```
