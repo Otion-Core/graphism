@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 0.4.2 (April 25th, 2022)
+
+* Fix query pagination and preloads - [#86](https://github.com/Gravity-Core/graphism/pull/86)
+
 ## 0.4.1 (April 22th, 2022)
 
 * Aggregate queries - [#84](https://github.com/Gravity-Core/graphism/pull/84)
