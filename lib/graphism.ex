@@ -2275,6 +2275,7 @@ defmodule Graphism do
 
         api_funs =
           []
+          |> with_query_preload_fun(e, schema)
           |> with_optional_query_pagination_fun(e, schema_module)
           |> with_api_list_funs(e, schema_module, repo_module, schema, hooks)
           |> with_api_aggregate_funs(e, schema_module, repo_module, schema, hooks)
@@ -2319,19 +2320,29 @@ defmodule Graphism do
     end
   end
 
-  defp entity_list_query_opts(e, schema) do
-    preloads = parent_preloads(e, schema) ++ child_preloads(e, schema)
-
-    [
-      preload: preloads
-    ]
-  end
-
   defp entity_aggregate_query_opts(_e, _schema) do
     []
   end
 
-  defp with_optional_query_pagination_fun(e, funs, schema_module) do
+  defp with_query_preload_fun(funs, e, schema) do
+    preloads = parent_preloads(e, schema) ++ child_preloads(e, schema)
+    
+    fun = case preloads do
+      [] -> quote do
+        defp maybe_with_preloads(query), do: {:ok, query}        
+      end
+
+      preloads -> quote do
+        defp maybe_with_preloads(query) do
+          {:ok, from(i in query, preload: unquote(preloads))}
+        end
+      end
+    end
+
+     [fun|funs]
+  end
+
+  defp with_optional_query_pagination_fun(funs, e, schema_module) do
     {default_sort_by, default_sort_direction} =
       case e[:opts][:sort] do
         :none -> {nil, nil}
@@ -2348,8 +2359,8 @@ defmodule Graphism do
         end
 
         defp maybe_sort(query, context) do
-          sort_by = Map.get(context, :sort_by, unquote(default_sort_by))
-          sort_direction = Map.get(context, :sort_direction, unquote(default_sort_direction))
+          sort_by = context[:sort_by] || unquote(default_sort_by)
+          sort_direction = context[:sort_direction] || unquote(default_sort_direction)
 
           maybe_sort(query, sort_by, sort_direction)
         end
@@ -2358,11 +2369,8 @@ defmodule Graphism do
         defp cast_sort_direction("desc"), do: {:ok, :desc}
         defp cast_sort_direction(:asc), do: {:ok, :asc}
         defp cast_sort_direction(:desc), do: {:ok, :desc}
-
-        defp cast_sort_direction(other) do
-          IO.inspect(other)
-          {:error, :invalid_sort_direction}
-        end
+        defp cast_sort_direction(_other), do: {:error, :invalid_sort_direction}
+      
 
         defp maybe_sort(query, nil, _), do: {:ok, query}
 
@@ -2370,7 +2378,7 @@ defmodule Graphism do
           with {:ok, sort_direction} <- cast_sort_direction(direction),
                {:ok, sort_column} <- unquote(schema_module).column_name(field) do
             opts = [{sort_direction, sort_column}]
-            {:ok, from(i in query, order_by: ^opts)}
+            {:ok, from(i in subquery(query), order_by: ^opts)}
           end
         end
 
@@ -2395,9 +2403,7 @@ defmodule Graphism do
     ]
   end
 
-  defp with_api_list_funs(funs, e, schema_module, repo_module, schema, hooks) do
-    query_opts = entity_list_query_opts(e, schema)
-
+  defp with_api_list_funs(funs, e, schema_module, repo_module, _schema, hooks) do
     action_opts = action_for(e, :list)
     scope_mod = scope_hook!(e, action_opts, :list, hooks)
 
@@ -2406,12 +2412,12 @@ defmodule Graphism do
         def list(context \\ %{}) do
           query =
             from(
-              unquote(var(e)) in unquote(schema_module),
-              unquote(query_opts)
+              unquote(var(e)) in unquote(schema_module)
             )
 
-          with {:ok, query} <- maybe_paginate(query, context),
-               query <- unquote(scope_mod).scope(query, context) do
+          with query <- unquote(scope_mod).scope(query, context),
+               {:ok, query} <- maybe_paginate(query, context),
+               {:ok, query} <- maybe_with_preloads(query) do
             {:ok, unquote(repo_module).all(query)}
           end
         end
@@ -2423,13 +2429,13 @@ defmodule Graphism do
             def unquote(String.to_atom("list_by_#{rel[:name]}"))(id, context \\ %{}) do
               query =
                 from(
-                  unquote(var(rel)) in unquote(schema_module),
-                  unquote(query_opts)
+                  unquote(var(rel)) in unquote(schema_module)
                 )
                 |> where([q], q.unquote(String.to_atom("#{rel[:name]}_id")) == ^id)
 
-              with {:ok, query} <- maybe_paginate(query, context),
-                   query <- unquote(scope_mod).scope(query, context) do
+              with query <- unquote(scope_mod).scope(query, context),
+                  {:ok, query} <- maybe_paginate(query, context),
+                  {:ok, query} <- maybe_with_preloads(query) do
                 {:ok, unquote(repo_module).all(query)}
               end
             end
