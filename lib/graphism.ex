@@ -2354,7 +2354,9 @@ defmodule Graphism do
       quote do
         defp maybe_paginate(query, context) do
           with {:ok, query} <- maybe_sort(query, context) do
-            maybe_limit(query, context)
+            {:ok, query
+            |> maybe_limit(context)
+            |> maybe_offset(context) }
           end
         end
 
@@ -2383,20 +2385,17 @@ defmodule Graphism do
         end
 
         defp maybe_limit(query, context) do
-          limit = Map.get(context, :limit, nil)
-          offset = Map.get(context, :offset, nil)
+          case Map.get(context, :limit) do
+            nil -> query
+            limit -> limit(query, ^limit)  
+          end
+        end 
 
-          maybe_limit(query, limit, offset)
-        end
-
-        defp maybe_limit(query, nil, _), do: {:ok, query}
-        defp maybe_limit(query, _, nil), do: {:ok, query}
-
-        defp maybe_limit(query, limit, offset) do
-          {:ok,
-           query
-           |> limit(^limit)
-           |> offset(^offset)}
+        defp maybe_offset(query, context) do
+          case Map.get(context, :offset) do
+            nil -> query
+            offset -> offset(query, ^offset)  
+          end
         end
       end
       | funs
