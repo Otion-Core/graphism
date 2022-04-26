@@ -4,7 +4,7 @@
 
 ## 0.4.3 (April 26th, 2022)
 
-* #87
+* https://github.com/Gravity-Core/graphism/pull/86
 
 ## 0.4.2 (April 25th, 2022)
 
