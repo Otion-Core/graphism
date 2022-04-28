@@ -2326,20 +2326,23 @@ defmodule Graphism do
 
   defp with_query_preload_fun(funs, e, schema) do
     preloads = parent_preloads(e, schema) ++ child_preloads(e, schema)
-    
-    fun = case preloads do
-      [] -> quote do
-        defp maybe_with_preloads(query), do: {:ok, query}        
+
+    fun =
+      case preloads do
+        [] ->
+          quote do
+            defp maybe_with_preloads(query), do: {:ok, query}
+          end
+
+        preloads ->
+          quote do
+            defp maybe_with_preloads(query) do
+              {:ok, from(i in query, preload: unquote(preloads))}
+            end
+          end
       end
 
-      preloads -> quote do
-        defp maybe_with_preloads(query) do
-          {:ok, from(i in query, preload: unquote(preloads))}
-        end
-      end
-    end
-
-     [fun|funs]
+    [fun | funs]
   end
 
   defp with_optional_query_pagination_fun(funs, e, schema_module) do
@@ -2354,9 +2357,10 @@ defmodule Graphism do
       quote do
         defp maybe_paginate(query, context) do
           with {:ok, query} <- maybe_sort(query, context) do
-            {:ok, query
-            |> maybe_limit(context)
-            |> maybe_offset(context) }
+            {:ok,
+             query
+             |> maybe_limit(context)
+             |> maybe_offset(context)}
           end
         end
 
@@ -2372,7 +2376,6 @@ defmodule Graphism do
         defp cast_sort_direction(:asc), do: {:ok, :asc}
         defp cast_sort_direction(:desc), do: {:ok, :desc}
         defp cast_sort_direction(_other), do: {:error, :invalid_sort_direction}
-      
 
         defp maybe_sort(query, nil, _), do: {:ok, query}
 
@@ -2387,14 +2390,14 @@ defmodule Graphism do
         defp maybe_limit(query, context) do
           case Map.get(context, :limit) do
             nil -> query
-            limit -> limit(query, ^limit)  
+            limit -> limit(query, ^limit)
           end
-        end 
+        end
 
         defp maybe_offset(query, context) do
           case Map.get(context, :offset) do
             nil -> query
-            offset -> offset(query, ^offset)  
+            offset -> offset(query, ^offset)
           end
         end
       end
@@ -2409,10 +2412,7 @@ defmodule Graphism do
     [
       quote do
         def list(context \\ %{}) do
-          query =
-            from(
-              unquote(var(e)) in unquote(schema_module)
-            )
+          query = from(unquote(var(e)) in unquote(schema_module))
 
           with query <- unquote(scope_mod).scope(query, context),
                {:ok, query} <- maybe_paginate(query, context),
@@ -2427,14 +2427,12 @@ defmodule Graphism do
           quote do
             def unquote(String.to_atom("list_by_#{rel[:name]}"))(id, context \\ %{}) do
               query =
-                from(
-                  unquote(var(rel)) in unquote(schema_module)
-                )
+                from(unquote(var(rel)) in unquote(schema_module))
                 |> where([q], q.unquote(String.to_atom("#{rel[:name]}_id")) == ^id)
 
               with query <- unquote(scope_mod).scope(query, context),
-                  {:ok, query} <- maybe_paginate(query, context),
-                  {:ok, query} <- maybe_with_preloads(query) do
+                   {:ok, query} <- maybe_paginate(query, context),
+                   {:ok, query} <- maybe_with_preloads(query) do
                 {:ok, unquote(repo_module).all(query)}
               end
             end
