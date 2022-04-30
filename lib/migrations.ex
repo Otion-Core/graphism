@@ -329,16 +329,16 @@ defmodule Graphism.Migrations do
     existing = Map.drop(existing, [:__enums])
 
     empty_migration()
-    |> without_old_indices(existing, schema_migration)
-    |> without_old_columns(existing, schema_migration)
-    |> without_old_tables(existing, schema_migration)
-    |> without_old_enums(existing_enums, schema_enums)
     |> with_new_enums(existing_enums, schema_enums)
     |> with_new_tables(existing, schema_migration)
     |> with_new_columns(existing, schema_migration, schema)
     |> with_new_indices(existing, schema_migration)
     |> with_existing_columns_modified(existing, schema_migration, schema)
     |> with_existing_enums_modified(existing_enums, schema_enums)
+    |> without_old_indices(existing, schema_migration)
+    |> without_old_columns(existing, schema_migration)
+    |> without_old_tables(existing, schema_migration)
+    |> without_old_enums(existing_enums, schema_enums)
   end
 
   defp empty_migration, do: []
@@ -1181,23 +1181,29 @@ defmodule Graphism.Migrations do
 
     migrations
     |> Enum.map(fn m ->
-      case m[:kind] do
-        :table ->
-          case m[:action] do
-            :create ->
-              {m, table_index(tables, m[:table])}
+      case {m[:action], m[:kind]} do
+        {:create, :table} ->
+          {m, table_index(tables, m[:table])}
 
-            :drop ->
-              {m, table_index(tables, m[:table], true)}
+        {:drop, :table} ->
+          {m, table_index(tables, m[:table], true)}
 
-            :alter ->
-              {m, 0}
-          end
+        {:alter, :table} ->
+          {m, 0}
 
-        :enum ->
+        {:create, :enum} ->
           {m, 1000}
 
-        :index ->
+        {:drop, :enum} ->
+          {m, -1000}
+
+        {:alter, :enum} ->
+          {m, 1000}
+
+        {:create, :index} ->
+          {m, 1000}
+
+        {:drop, :index} ->
           {m, -1000}
 
         _ ->
