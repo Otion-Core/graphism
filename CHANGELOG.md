@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+* More accurate primary keys in relations with aliases - [#89](https://github.com/Gravity-Core/graphism/pull/89)
+
 ## 0.4.3 (April 26th, 2022)
 
 * More flexible query pagination - [#87](https://github.com/Gravity-Core/graphism/pull/87)

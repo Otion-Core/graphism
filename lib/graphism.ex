@@ -1017,17 +1017,27 @@ defmodule Graphism do
 
               case rel[:kind] do
                 :belongs_to ->
+                  foreign_key = String.to_atom("#{rel[:name]}_id")
+
                   quote do
                     Ecto.Schema.belongs_to(
                       unquote(rel[:name]),
                       unquote(schema_module),
-                      type: :binary_id
+                      type: :binary_id,
+                      foreign_key: unquote(foreign_key)
                     )
                   end
 
                 :has_many ->
+                  inverse_rel = inverse_relation!(schema, e, rel[:name])
+                  foreign_key = String.to_atom("#{inverse_rel[:name]}_id")
+
                   quote do
-                    Ecto.Schema.has_many(unquote(rel[:name]), unquote(schema_module))
+                    Ecto.Schema.has_many(
+                      unquote(rel[:name]),
+                      unquote(schema_module),
+                      foreign_key: unquote(foreign_key)
+                    )
                   end
               end
             end)
@@ -1346,6 +1356,29 @@ defmodule Graphism do
     end
 
     rel
+  end
+
+  defp inverse_relation!(schema, e, name) do
+    rel = relation!(e, name)
+    target = find_entity!(schema, rel[:target])
+
+    case rel[:kind] do
+      :has_many ->
+        inverse_rels = Enum.filter(target[:relations], fn inv -> inv[:kind] == :belongs_to end)
+        inverse_rel = Enum.find(inverse_rels, fn inv -> inv[:target] == e[:name] end)
+
+        unless inverse_rel do
+          raise """
+            Could not find inverse for :has_many relation #{rel[:name]} of #{e[:name]} in
+            #{inspect(inverse_rels)} of #{target[:name]} 
+          """
+        end
+
+        inverse_rel
+
+      :belongs_to ->
+        raise "Inverse for belongs_to -> has_many not implemented yet"
+    end
   end
 
   defp relation?(e, name), do: field?(e[:relations], name)
