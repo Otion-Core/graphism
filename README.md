@@ -475,7 +475,7 @@ query {
 
 In addition to listing entities, it is also possible to aggregate (eg. count) them. 
 
-````
+```
 query {
   contacts {
     aggregateAll {
@@ -484,3 +484,19 @@ query {
   }
 }
 ```
+
+### Cascade deletes
+
+By default, it is not possible to delete an entity if it has children entities pointing to it. But this can be
+overriden on a per-relation basis:
+
+```elixir
+entity :node do
+  ...
+  belongs_to(:node, as: parent, delete: :cascade)
+  ...
+end
+```
+
+Graphism will take of writing the correct migrations, including dropping existing constraints, in order to fully support
+changes in this policy.

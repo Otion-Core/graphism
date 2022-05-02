@@ -198,8 +198,17 @@ defmodule Graphism.Migrations do
 
   defp column_opts_from_relation(rel, index) do
     target = entity!(index, rel[:target])
-    referenced_tabled = target[:table]
-    [null: optional?(rel), references: referenced_tabled]
+    referenced_table = target[:table]
+    on_delete = on_delete_column_opt(rel)
+
+    [null: optional?(rel), references: referenced_table, on_delete: on_delete]
+  end
+
+  defp on_delete_column_opt(rel) do
+    case get_in(rel, [:opts, :delete]) do
+      :cascade -> :delete_all
+      nil -> :nothing
+    end
   end
 
   defp column_opts_from_attribute(attr) do
@@ -503,6 +512,7 @@ defmodule Graphism.Migrations do
                  %{column: col, type: nil, opts: []}
                  |> with_column_type_change(existing_column, schema_column)
                  |> with_column_null_change(existing_column, schema_column)
+                 |> with_column_on_delete_change(existing_column, schema_column)
                  |> with_modify_action_or_nil(schema_column)
                  |> with_column_kind()
                end)
@@ -549,6 +559,24 @@ defmodule Graphism.Migrations do
 
       _ ->
         col
+    end
+  end
+
+  defp with_column_on_delete_change(col, existing, schema) do
+    old = get_in(existing, [:opts, :on_delete]) || :nothing
+    new = get_in(schema, [:opts, :on_delete]) || :nothing
+
+    if old != new do
+      schema_opts = schema[:opts]
+      references = Keyword.fetch!(schema_opts, :references)
+      null = Keyword.fetch!(schema_opts, :null)
+
+      col
+      |> put_in([:opts, :on_delete], new)
+      |> put_in([:opts, :references], references)
+      |> put_in([:opts, :null], null)
+    else
+      col
     end
   end
 
@@ -981,6 +1009,8 @@ defmodule Graphism.Migrations do
     []
   end
 
+  defp parse_up({:drop, _, [{:constraint, _, _}]}), do: []
+
   defp parse_up(other) do
     Logger.warn(
       "Unable to parse migration code #{inspect(other)}: #{other |> Macro.to_string() |> Code.format_string!()}"
@@ -1034,9 +1064,13 @@ defmodule Graphism.Migrations do
     %{column: name, action: action, kind: :column}
   end
 
-  defp type_change(col, {:references, _, [table, [type: type]]}) do
+  defp type_change(col, {:references, _, [table, references_opts]}) do
+    type = Keyword.fetch!(references_opts, :type)
+    on_delete = references_opts[:on_delete] || :nothing
+
     col
     |> put_in([:opts, :references], table)
+    |> put_in([:opts, :on_delete], on_delete)
     |> Map.put(:type, type)
   end
 
@@ -1256,6 +1290,11 @@ defmodule Graphism.Migrations do
   end
 
   defp quote_migration(%{table: table, action: :alter, kind: :table, columns: cols}) do
+    drop_constraints =
+      cols
+      |> Enum.filter(fn col -> col[:opts][:references] end)
+      |> Enum.map(&drop_constraint_ast(table, &1))
+
     alter_table =
       {:alter, [line: 1],
        [
@@ -1267,10 +1306,10 @@ defmodule Graphism.Migrations do
 
     case Enum.filter(cols, &(&1[:action] == :modify and &1[:cast])) do
       [] ->
-        alter_table
+        drop_constraints ++ [alter_table]
 
       cols ->
-        Enum.map(cols, &column_alias_ast(table, &1)) ++ [alter_table]
+        drop_constraints ++ Enum.map(cols, &column_alias_ast(table, &1)) ++ [alter_table]
     end
   end
 
@@ -1351,24 +1390,39 @@ defmodule Graphism.Migrations do
         {action, [], [name, type]}
 
       _ ->
-        # Transform :references hints into proper migration DSL
         case opts[:references] do
           nil ->
             {action, [], [name, type, opts]}
 
           target_table ->
-            nullable = opts[:null] || false
+            column_opts = []
 
-            {action, [], [name, {:references, [], [target_table, [type: :uuid]]}, [null: nullable]]}
+            column_opts =
+              case opts[:null] do
+                nil -> column_opts
+                null -> [null: null]
+              end
+
+            references_opts = [type: :uuid]
+
+            references_opts =
+              case opts[:on_delete] do
+                nil -> references_opts
+                on_delete -> Keyword.put(references_opts, :on_delete, on_delete)
+              end
+
+            {action, [], [name, {:references, [], [target_table, references_opts]}, column_opts]}
         end
     end
   end
 
-  # Translates a drop table change into the AST
-  # that will be included in a migration, inside an alter
-  # table block
   defp column_change_ast(%{column: name, action: :remove, kind: :column}) do
     {:remove, [], [name]}
+  end
+
+  defp drop_constraint_ast(table, %{column: column}) do
+    constraint = "#{table}_#{column}_fkey"
+    {:drop, [], [{:constraint, [], [table, constraint]}]}
   end
 
   defp timestamps_ast() do
