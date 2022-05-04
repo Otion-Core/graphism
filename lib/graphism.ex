@@ -2308,6 +2308,7 @@ defmodule Graphism do
 
         api_funs =
           []
+          |> with_api_convenience_functions()
           |> with_query_preload_fun(e, schema)
           |> with_optional_query_pagination_fun(e, schema_module)
           |> with_api_list_funs(e, schema_module, repo_module, schema, hooks)
@@ -2433,6 +2434,16 @@ defmodule Graphism do
             offset -> offset(query, ^offset)
           end
         end
+      end
+      | funs
+    ]
+  end
+
+  defp with_api_convenience_functions(funs) do
+    [
+      quote do
+        defp maybe_id(nil), do: nil
+        defp maybe_id(e), do: e.id
       end
       | funs
     ]
@@ -2757,34 +2768,20 @@ defmodule Graphism do
   end
 
   defp attrs_with_parent_relations(e) do
-    parent_relations(e)
-    |> Enum.map(fn rel ->
-      quote do
-        attrs <-
-          Map.put(
-            attrs,
-            unquote(String.to_atom("#{rel[:name]}_id")),
-            unquote(
-              case optional?(rel) do
-                true ->
-                  quote do
-                    case unquote(var(rel)) do
-                      nil ->
-                        nil
+    e
+    |> parent_relations()
+    |> Enum.flat_map(fn rel ->
+      rel_key = rel[:name]
+      rel_id_key = String.to_atom("#{rel_key}_id")
 
-                      _ ->
-                        unquote(var(rel)).id
-                    end
-                  end
-
-                false ->
-                  quote do
-                    unquote(var(rel)).id
-                  end
-              end
-            )
-          )
-      end
+      [
+        quote do
+          attrs <- Map.put(attrs, unquote(rel_key), unquote(var(rel)))
+        end,
+        quote do
+          attrs <- Map.put(attrs, unquote(rel_id_key), maybe_id(unquote(var(rel))))
+        end
+      ]
     end)
   end
 
