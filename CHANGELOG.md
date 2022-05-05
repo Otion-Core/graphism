@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.4.4 (May 5th, 2022)
+
 * Pass parent structs to before hooks - [#92](https://github.com/Gravity-Core/graphism/pull/92)
 * Cascade deletes - [#91](https://github.com/Gravity-Core/graphism/pull/91)
 * Better migrations - [#90](https://github.com/Gravity-Core/graphism/pull/90)
