@@ -286,8 +286,8 @@ defmodule Graphism do
             unquote_splicing(
               Enum.flat_map(schema, fn e ->
                 entity_attributes_auth(e, default_allow_hook, context_builder) ++
-                  entity_belongs_to_relations_auth(e, default_allow_hook, context_builder) ++
-                  entity_has_many_relations_auth(e, default_allow_hook, context_builder)
+                  entity_belongs_to_relations_auth(e, default_allow_hook, context_builder, schema) ++
+                  entity_has_many_relations_auth(e, default_allow_hook, context_builder, schema)
               end)
             )
 
@@ -500,12 +500,14 @@ defmodule Graphism do
       entity_name = e[:name]
       field_name = attr[:name]
       mod = attr[:opts][:allow] || default_allow_hook
+      schema_module = e[:schema_module]
 
       quote do
         defp auth(unquote(entity_name), unquote(field_name), resolution) do
           graphism = %{
             entity: unquote(entity_name),
-            field: unquote(field_name)
+            field: unquote(field_name),
+            schema: unquote(schema_module)
           }
 
           context =
@@ -526,7 +528,7 @@ defmodule Graphism do
     end)
   end
 
-  def entity_belongs_to_relations_auth(e, default_allow_hook, context_builder) do
+  def entity_belongs_to_relations_auth(e, default_allow_hook, context_builder, schema) do
     e[:relations]
     |> Enum.filter(fn rel -> rel[:kind] == :belongs_to end)
     |> Enum.map(fn rel ->
@@ -534,13 +536,17 @@ defmodule Graphism do
       field_name = rel[:name]
       target_entity = rel[:target]
       mod = rel[:opts][:allow] || default_allow_hook
+      schema_module = e[:schema_module]
+      target_schema_module = find_entity!(schema, target_entity)[:schema_module]
 
       quote do
         defp auth(unquote(entity_name), unquote(field_name), resolution) do
           graphism = %{
             entity: unquote(entity_name),
             field: unquote(field_name),
-            target_entity: unquote(target_entity)
+            target_entity: unquote(target_entity),
+            schema: unquote(schema_module),
+            target_schema: unquote(target_schema_module)
           }
 
           field_value = Map.get(resolution.source, unquote(field_name))
@@ -564,7 +570,7 @@ defmodule Graphism do
     end)
   end
 
-  def entity_has_many_relations_auth(e, default_allow_hook, context_builder) do
+  def entity_has_many_relations_auth(e, default_allow_hook, context_builder, schema) do
     e[:relations]
     |> Enum.filter(fn rel -> rel[:kind] == :has_many end)
     |> Enum.map(fn rel ->
@@ -572,13 +578,17 @@ defmodule Graphism do
       field_name = rel[:name]
       target_entity = rel[:target]
       mod = rel[:opts][:allow] || default_allow_hook
+      schema_module = e[:schema_module]
+      target_schema_module = find_entity!(schema, target_entity)[:schema_module]
 
       quote do
         defp auth(unquote(entity_name), unquote(field_name), resolution) do
           graphism = %{
             entity: unquote(entity_name),
             field: unquote(field_name),
-            target_entity: unquote(target_entity)
+            target_entity: unquote(target_entity),
+            schema: unquote(schema_module),
+            target_schema: unquote(target_schema_module)
           }
 
           context =
@@ -1092,28 +1102,16 @@ defmodule Graphism do
 
         unquote_splicing(
           (names(stored_attributes) ++ [:inserted_at, :updated_at])
-          |> Enum.map(fn name ->
-            quote do
-              def column_name(unquote(Inflex.camelize(name, :lower))), do: {:ok, unquote(name)}
-            end
-          end)
+          |> Enum.map(&column_name_ast/1)
         )
 
         unquote_splicing(
           e
           |> parent_relations()
           |> names()
-          |> Enum.map(fn name ->
-            column_name = String.to_atom("#{name}_id")
-
-            quote do
-              def column_name(unquote(Inflex.camelize(name, :lower))), do: {:ok, unquote(column_name)}
-            end
-          end)
+          |> Enum.map(&column_name_ast(&1, suffix: "_id"))
         )
 
-        def column_name(:inserted_at), do: {:ok, :inserted_at}
-        def column_name(:updated_at), do: {:ok, :updated_at}
         def column_name(_), do: {:error, :unknown_field}
 
         def changeset(e, attrs) do
@@ -1208,6 +1206,30 @@ defmodule Graphism do
 
           changes
         end
+      end
+    end
+  end
+
+  defp column_name_ast(name, opts \\ []) do
+    duck_cased = to_string(name)
+    camel_cased = Inflex.camelize(name, :lower)
+
+    column_name =
+      case opts[:suffix] do
+        nil -> name
+        suffix -> String.to_atom("#{name}#{suffix}")
+      end
+
+    if duck_cased == camel_cased do
+      quote do
+        def column_name(unquote(camel_cased)), do: {:ok, unquote(column_name)}
+        def column_name(unquote(name)), do: {:ok, unquote(column_name)}
+      end
+    else
+      quote do
+        def column_name(unquote(camel_cased)), do: {:ok, unquote(column_name)}
+        def column_name(unquote(duck_cased)), do: {:ok, unquote(column_name)}
+        def column_name(unquote(name)), do: {:ok, unquote(column_name)}
       end
     end
   end
@@ -1448,7 +1470,11 @@ defmodule Graphism do
       context =
         context
         |> Map.drop([:__absinthe_plug__, :loader, :pubsub])
-        |> Map.put(:graphism, %{entity: unquote(e[:name]), action: unquote(action)})
+        |> Map.put(:graphism, %{
+          entity: unquote(e[:name]),
+          action: unquote(action),
+          schema: unquote(e[:schema_module])
+        })
     end
   end
 

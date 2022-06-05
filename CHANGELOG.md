@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+* Introspection enhancements - [#94](https://github.com/Gravity-Core/graphism/pull/94)
+
 ## 0.4.4 (May 5th, 2022)
 
 * Pass parent structs to before hooks - [#92](https://github.com/Gravity-Core/graphism/pull/92)
