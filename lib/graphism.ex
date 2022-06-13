@@ -1114,6 +1114,20 @@ defmodule Graphism do
 
         def column_name(_), do: {:error, :unknown_field}
 
+        unquote_splicing(
+          (names(stored_attributes) ++ [:inserted_at, :updated_at])
+          |> Enum.map(&attribute_column_type_ast(e, &1, schema))
+        )
+
+        unquote_splicing(
+          e
+          |> parent_relations()
+          |> names()
+          |> Enum.map(&relation_column_type_ast(e, &1, schema))
+        )
+
+        def column_type(_), do: {:error, :unknown_field}
+
         def changeset(e, attrs) do
           changes =
             e
@@ -1230,6 +1244,68 @@ defmodule Graphism do
         def column_name(unquote(camel_cased)), do: {:ok, unquote(column_name)}
         def column_name(unquote(duck_cased)), do: {:ok, unquote(column_name)}
         def column_name(unquote(name)), do: {:ok, unquote(column_name)}
+      end
+    end
+  end
+
+  defp attribute_column_type_ast(_, field, _shcema) when field in [:inserted_at, :updated_at] do
+    duck_cased = to_string(field)
+    camel_cased = Inflex.camelize(field, :lower)
+    type = :timestamp
+
+    quote do
+      def column_type(unquote(duck_cased)), do: {:ok, unquote(type)}
+      def column_type(unquote(camel_cased)), do: {:ok, unquote(type)}
+      def column_type(unquote(field)), do: {:ok, unquote(type)}
+    end
+  end
+
+  defp attribute_column_type_ast(e, field, _schema) do
+    duck_cased = to_string(field)
+    camel_cased = Inflex.camelize(field, :lower)
+    attr = attribute!(e, field)
+    type = attr[:kind]
+
+    if duck_cased == camel_cased do
+      quote do
+        def column_type(unquote(duck_cased)), do: {:ok, unquote(type)}
+        def column_type(unquote(field)), do: {:ok, unquote(type)}
+      end
+    else
+      quote do
+        def column_type(unquote(duck_cased)), do: {:ok, unquote(type)}
+        def column_type(unquote(camel_cased)), do: {:ok, unquote(type)}
+        def column_type(unquote(field)), do: {:ok, unquote(type)}
+      end
+    end
+  end
+
+  defp relation_column_type_ast(e, field, schema) do
+    duck_cased = to_string(field)
+    camel_cased = Inflex.camelize(field, :lower)
+
+    rel = relation!(e, field)
+    target_name = rel[:target]
+    target = find_entity!(schema, target_name)
+    type = rel[:kind]
+    target_schema_module = target[:schema_module]
+
+    if duck_cased == camel_cased do
+      quote do
+        def column_type(unquote(duck_cased)),
+          do: {:ok, unquote(type), unquote(target_name), unquote(target_schema_module)}
+
+        def column_type(unquote(field)), do: {:ok, unquote(type), unquote(target_name), unquote(target_schema_module)}
+      end
+    else
+      quote do
+        def column_type(unquote(duck_cased)),
+          do: {:ok, unquote(type), unquote(target_name), unquote(target_schema_module)}
+
+        def column_type(unquote(camel_cased)),
+          do: {:ok, unquote(type), unquote(target_name), unquote(target_schema_module)}
+
+        def column_type(unquote(field)), do: {:ok, unquote(type), unquote(target_name), unquote(target_schema_module)}
       end
     end
   end
