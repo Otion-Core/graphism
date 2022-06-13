@@ -708,6 +708,9 @@ defmodule Graphism do
   defmacro string(_name, _opts \\ []) do
   end
 
+  defmacro text(_name, _opts \\ []) do
+  end
+
   defmacro integer(_name, _opts \\ []) do
   end
 
@@ -1138,6 +1141,7 @@ defmodule Graphism do
           unquote_splicing(
             e[:attributes]
             |> Enum.filter(fn attr -> attr[:kind] == :string end)
+            |> Enum.reject(fn attr -> attr[:opts][:store] == :text end)
             |> Enum.map(fn attr ->
               quote do
                 changes =
@@ -1468,7 +1472,7 @@ defmodule Graphism do
         unless inverse_rel do
           raise """
             Could not find inverse for :has_many relation #{rel[:name]} of #{e[:name]} in
-            #{inspect(inverse_rels)} of #{target[:name]} 
+            #{inspect(inverse_rels)} of #{target[:name]}
           """
         end
 
@@ -3920,6 +3924,7 @@ defmodule Graphism do
   end
 
   defp attribute({:string, _, [name]}), do: attribute([name, :string])
+  defp attribute({:text, _, [name]}), do: attribute([name, :string, [store: :text]])
   defp attribute({:integer, _, [name]}), do: attribute([name, :integer])
   defp attribute({:boolean, _, [name]}), do: attribute([name, :boolean])
   defp attribute({:float, _, [name]}), do: attribute([name, :float])

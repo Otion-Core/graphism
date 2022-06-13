@@ -2,9 +2,10 @@
 
 ## Unreleased
 
+* Add `:text` attribute type - [#97](https://github.com/Gravity-Core/graphism/pull/97)
 * Introspection enhancements
-  * Add `column_type/1` to entity schema mmodule [#94](https://github.com/Gravity-Core/graphism/pull/94)
-  * Add `column_name/1` to entity schema module [#96](https://github.com/Gravity-Core/graphism/pull/94)
+  * Add `column_type/1` to entity schema mmodule - [#94](https://github.com/Gravity-Core/graphism/pull/94)
+  * Add `column_name/1` to entity schema module - [#96](https://github.com/Gravity-Core/graphism/pull/96)
 
 ## 0.4.4 (May 5th, 2022)
 

@@ -440,7 +440,7 @@ defmodule Graphism.Migrations do
                  %{
                    column: col,
                    type: column_stored_type(column),
-                   opts: column[:opts],
+                   opts: column[:opts] |> Keyword.drop([:store]),
                    action: :add,
                    kind: :column
                  }
