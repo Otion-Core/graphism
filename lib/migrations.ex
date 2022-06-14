@@ -674,7 +674,13 @@ defmodule Graphism.Migrations do
   end
 
   defp migration_from_column(col, spec, action) do
-    %{column: col, type: spec[:type], opts: spec[:opts], action: action, kind: :column}
+    %{
+      column: col,
+      type: column_stored_type(spec),
+      opts: spec[:opts] |> Keyword.drop([:store]),
+      action: action,
+      kind: :column
+    }
   end
 
   defp read_migrations(migrations) do

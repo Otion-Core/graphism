@@ -4,7 +4,7 @@ defmodule Graphism.MixProject do
   def project do
     [
       app: :graphism,
-      version: "0.4.4",
+      version: "0.5.1",
       elixir: "~> 1.11",
       elixirc_paths: elixirc_paths(Mix.env()),
       start_permanent: Mix.env() == :prod,
