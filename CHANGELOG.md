@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 0.5.1 (June 14th, 2022)
+
+* Fix support for `:text` attributes - [#98](https://github.com/Gravity-Core/graphism/pull/98)
+
 ## 0.5.0 (June 13th, 2022)
 
 * Add `:text` attribute type - [#97](https://github.com/Gravity-Core/graphism/pull/97)
