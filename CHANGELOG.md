@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+* Json type - [#100](https://github.com/Gravity-Core/graphism/pull/100)
 * Improved schema Introspection - [#99](https://github.com/Gravity-Core/graphism/pull/99)
 
 ## 0.5.1 (June 14th, 2022)

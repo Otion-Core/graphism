@@ -525,3 +525,49 @@ iex> MyBlog.Schema.Comment.field_specs({:belongs_to, MyBlog.Schema.Post})
 [{:belongs_to, :blog, MyBlog.Schema.Post, :blog_id}]
 ```
 
+### Json types
+
+Graphism allows you to define attributes of `json` type in order to store unstructured data as maps or arrays:
+
+```elixir
+entity :color do
+  json(:data)
+  action(:create)
+  action(:list)
+end
+```
+
+With this, you can define the `data` as a string value in your mutation:
+
+```graphql
+mutation {
+  color{
+    create(data: "{ \"r\": 255, \"g\": 0, \"b\": 0 }") {
+     id,
+     data 
+    }
+  }
+}
+```
+
+And you will get the data back as json:
+
+```json
+{
+  "data": {
+    "color": {
+      "create": {
+        "id": "eb40ddfb-2208-4588-b57f-0931fa18c0fe",
+        "data": {
+          "b": 0,
+          "g": 0,
+          "r": 255
+        }
+      }
+    }
+  }
+}
+```
+
+
+
