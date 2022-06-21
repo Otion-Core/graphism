@@ -940,9 +940,12 @@ defmodule Graphism do
                 raise "Entity #{e[:name]} has relation #{rel[:name]} of unknown type: #{inspect(Map.keys(index))}"
               end
 
+              name = rel[:opts][:as] || rel[:name]
+
               rel
               |> Keyword.put(:target, target[:name])
-              |> Keyword.put(:name, rel[:opts][:as] || rel[:name])
+              |> Keyword.put(:name, name)
+              |> Keyword.put(:column, String.to_atom("#{name}_id"))
           end
 
         opts = rel[:opts]
@@ -1105,31 +1108,21 @@ defmodule Graphism do
 
         unquote_splicing(
           (names(stored_attributes) ++ [:inserted_at, :updated_at])
-          |> Enum.map(&column_name_ast/1)
+          |> Enum.map(&attribute_field_spec_ast(e, &1, schema))
         )
 
         unquote_splicing(
           e
-          |> parent_relations()
+          |> relations()
           |> names()
-          |> Enum.map(&column_name_ast(&1, suffix: "_id"))
+          |> Enum.map(&relation_field_spec_ast(e, &1, schema))
         )
 
-        def column_name(_), do: {:error, :unknown_field}
+        def field_spec(_), do: {:error, :unknown_field}
 
-        unquote_splicing(
-          (names(stored_attributes) ++ [:inserted_at, :updated_at])
-          |> Enum.map(&attribute_column_type_ast(e, &1, schema))
-        )
+        unquote_splicing(relation_field_specs_ast(e, schema))
 
-        unquote_splicing(
-          e
-          |> parent_relations()
-          |> names()
-          |> Enum.map(&relation_column_type_ast(e, &1, schema))
-        )
-
-        def column_type(_), do: {:error, :unknown_field}
+        def field_specs(_), do: []
 
         def changeset(e, attrs) do
           changes =
@@ -1228,90 +1221,89 @@ defmodule Graphism do
     end
   end
 
-  defp column_name_ast(name, opts \\ []) do
-    duck_cased = to_string(name)
-    camel_cased = Inflex.camelize(name, :lower)
-
-    column_name =
-      case opts[:suffix] do
-        nil -> name
-        suffix -> String.to_atom("#{name}#{suffix}")
-      end
-
-    if duck_cased == camel_cased do
-      quote do
-        def column_name(unquote(camel_cased)), do: {:ok, unquote(column_name)}
-        def column_name(unquote(name)), do: {:ok, unquote(column_name)}
-      end
-    else
-      quote do
-        def column_name(unquote(camel_cased)), do: {:ok, unquote(column_name)}
-        def column_name(unquote(duck_cased)), do: {:ok, unquote(column_name)}
-        def column_name(unquote(name)), do: {:ok, unquote(column_name)}
-      end
-    end
-  end
-
-  defp attribute_column_type_ast(_, field, _shcema) when field in [:inserted_at, :updated_at] do
+  defp attribute_field_spec_ast(e, field, _schema) do
     duck_cased = to_string(field)
     camel_cased = Inflex.camelize(field, :lower)
-    type = :timestamp
+
+    {column_name, type} =
+      if field in [:inserted_at, :updated_at] do
+        {field, :timestamp}
+      else
+        attr = attribute!(e, field)
+        {attr[:name], attr[:kind]}
+      end
+
+    spec = {:ok, type, column_name}
+
+    aliases = Enum.uniq([duck_cased, camel_cased, field])
 
     quote do
-      def column_type(unquote(duck_cased)), do: {:ok, unquote(type)}
-      def column_type(unquote(camel_cased)), do: {:ok, unquote(type)}
-      def column_type(unquote(field)), do: {:ok, unquote(type)}
+      (unquote_splicing(
+         for alias <- aliases do
+           quote do
+             def field_spec(unquote(alias)), do: unquote(Macro.escape(spec))
+           end
+         end
+       ))
     end
   end
 
-  defp attribute_column_type_ast(e, field, _schema) do
+  defp relation_field_spec_ast(e, field, schema) do
     duck_cased = to_string(field)
     camel_cased = Inflex.camelize(field, :lower)
-    attr = attribute!(e, field)
-    type = attr[:kind]
 
-    if duck_cased == camel_cased do
-      quote do
-        def column_type(unquote(duck_cased)), do: {:ok, unquote(type)}
-        def column_type(unquote(field)), do: {:ok, unquote(type)}
-      end
-    else
-      quote do
-        def column_type(unquote(duck_cased)), do: {:ok, unquote(type)}
-        def column_type(unquote(camel_cased)), do: {:ok, unquote(type)}
-        def column_type(unquote(field)), do: {:ok, unquote(type)}
-      end
+    spec = relation_field_spec(e, field, schema)
+
+    aliases = Enum.uniq([duck_cased, camel_cased, field])
+
+    quote do
+      (unquote_splicing(
+         for alias <- aliases do
+           quote do
+             def field_spec(unquote(alias)), do: unquote(Macro.escape(spec))
+           end
+         end
+       ))
     end
   end
 
-  defp relation_column_type_ast(e, field, schema) do
-    duck_cased = to_string(field)
-    camel_cased = Inflex.camelize(field, :lower)
-
+  defp relation_field_spec(e, field, schema) do
     rel = relation!(e, field)
     target_name = rel[:target]
     target = find_entity!(schema, target_name)
     type = rel[:kind]
     target_schema_module = target[:schema_module]
 
-    if duck_cased == camel_cased do
-      quote do
-        def column_type(unquote(duck_cased)),
-          do: {:ok, unquote(type), unquote(target_name), unquote(target_schema_module)}
+    case type do
+      :has_many ->
+        {:ok, type, target_name, target_schema_module}
 
-        def column_type(unquote(field)), do: {:ok, unquote(type), unquote(target_name), unquote(target_schema_module)}
-      end
-    else
-      quote do
-        def column_type(unquote(duck_cased)),
-          do: {:ok, unquote(type), unquote(target_name), unquote(target_schema_module)}
-
-        def column_type(unquote(camel_cased)),
-          do: {:ok, unquote(type), unquote(target_name), unquote(target_schema_module)}
-
-        def column_type(unquote(field)), do: {:ok, unquote(type), unquote(target_name), unquote(target_schema_module)}
-      end
+      :belongs_to ->
+        {:ok, type, target_name, target_schema_module, rel[:column]}
     end
+  end
+
+  defp relation_field_specs_ast(e, schema) do
+    e
+    |> relations()
+    |> Enum.group_by(fn rel ->
+      kind = rel[:kind]
+      schema = find_entity!(schema, rel[:target])[:schema_module]
+      {kind, schema}
+    end)
+    |> Enum.map(fn {group, rels} ->
+      rels =
+        Enum.map(rels, fn rel ->
+          [:ok | rest] = relation_field_spec(e, rel[:name], schema) |> Tuple.to_list()
+          List.to_tuple(rest)
+        end)
+
+      quote do
+        def field_specs(unquote(Macro.escape(group))) do
+          unquote(Macro.escape(rels))
+        end
+      end
+    end)
   end
 
   defp with_entity_funs(funs, e, action, fun) do
@@ -1898,8 +1890,11 @@ defmodule Graphism do
     end)
   end
 
+  defp relations(e), do: e[:relations]
+
   defp parent_relations(e) do
-    e[:relations]
+    e
+    |> relations()
     |> Enum.filter(fn rel -> rel[:kind] == :belongs_to end)
   end
 
@@ -2521,9 +2516,17 @@ defmodule Graphism do
 
         defp maybe_sort(query, field, direction) do
           with {:ok, sort_direction} <- cast_sort_direction(direction),
-               {:ok, sort_column} <- unquote(schema_module).column_name(field) do
+               {:ok, sort_column} <- sort_column(field) do
             opts = [{sort_direction, sort_column}]
             {:ok, from(i in subquery(query), order_by: ^opts)}
+          end
+        end
+
+        defp sort_column(field) do
+          case unquote(schema_module).field_spec(field) do
+            {:ok, _, sort_column} -> {:ok, sort_column}
+            {:ok, :belongs_to, _, _, sort_column} -> {:ok, sort_column}
+            _ -> {:error, :invalid_sort_by}
           end
         end
 

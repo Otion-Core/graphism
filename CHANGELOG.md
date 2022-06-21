@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+* Improved schema Introspection - [#99](https://github.com/Gravity-Core/graphism/pull/99)
+
 ## 0.5.1 (June 14th, 2022)
 
 * Fix support for `:text` attributes - [#98](https://github.com/Gravity-Core/graphism/pull/98)

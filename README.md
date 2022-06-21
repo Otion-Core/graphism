@@ -500,3 +500,28 @@ end
 
 Graphism will take of writing the correct migrations, including dropping existing constraints, in order to fully support
 changes in this policy.
+
+### Schema introspection
+
+Sometimes you might need to be able to instrospect your schema in a programmatic way. Graphism generates
+for you a couple of useful functions:
+
+* `field_spec/1`
+* `field_specs/1`
+
+Examples:
+
+```elixir
+iex> MyBlog.Schema.Post.field_spec("body")
+{:ok, :string, :body}
+
+iex> MyBlog.Schema.Post.field_spec("comments")
+{:ok, :has_many, :comment, MyBlog.Schema.Comment}
+
+iex> MyBlog.Schema.Comment.field_spec("blog")
+{:ok, :belongs_to, :blog, MyBlog.Schema.Post, :blog_id}
+
+iex> MyBlog.Schema.Comment.field_specs({:belongs_to, MyBlog.Schema.Post})
+[{:belongs_to, :blog, MyBlog.Schema.Post, :blog_id}]
+```
+
