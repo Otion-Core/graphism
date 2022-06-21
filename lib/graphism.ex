@@ -71,6 +71,7 @@ defmodule Graphism do
         import Absinthe.Resolution.Helpers, only: [dataloader: 1]
         import_types(Absinthe.Type.Custom)
         import_types(Absinthe.Plug.Types)
+        import_types(Graphism.Type.Graphql.Json)
 
         @sources [unquote(__CALLER__.module).Dataloader.Repo]
         @fields_auth unquote(__CALLER__.module).FieldsAuth
@@ -744,6 +745,9 @@ defmodule Graphism do
   defmacro virtual(_name, _opts \\ []) do
   end
 
+  defmacro json(_name, _opts \\ []) do
+  end
+
   defp without_nils(enum) do
     Enum.reject(enum, fn item -> item == nil end)
   end
@@ -771,7 +775,8 @@ defmodule Graphism do
     :number,
     :date,
     :boolean,
-    :upload
+    :upload,
+    :json
   ]
 
   defp validate_attribute_type!(type) do
@@ -1007,7 +1012,8 @@ defmodule Graphism do
         schema unquote("#{e[:plural]}") do
           unquote_splicing(
             Enum.map(stored_attributes, fn attr ->
-              kind = ecto_datatype(attr[:kind])
+              kind = get_in(attr, [:opts, :schema]) || attr[:kind]
+              kind = ecto_datatype(kind)
 
               case attr[:opts][:default] do
                 nil ->
@@ -3935,6 +3941,7 @@ defmodule Graphism do
   defp attribute({:date, _, [name]}), do: attribute([name, :date])
   defp attribute({:decimal, _, [name]}), do: attribute([name, :decimal])
   defp attribute({:upload, _, [name]}), do: attribute([name, :upload, [modifiers: [:virtual]]])
+  defp attribute({:json, _, [name]}), do: attribute([name, :json, [schema: Graphism.Type.Ecto.Jsonb, store: :map]])
 
   defp attribute({kind, _, [attr, opts]}) do
     with attr when attr != nil <- attribute({kind, nil, [attr]}) do
