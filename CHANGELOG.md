@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+* Scope list results - [#101](https://github.com/Gravity-Core/graphism/pull/101)
 * Json type - [#100](https://github.com/Gravity-Core/graphism/pull/100)
 * Improved schema Introspection - [#99](https://github.com/Gravity-Core/graphism/pull/99)
 

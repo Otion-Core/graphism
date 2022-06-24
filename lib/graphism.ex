@@ -1515,6 +1515,24 @@ defmodule Graphism do
     ]
   end
 
+  defp with_resolver_scope_results_fun(funs, context_builder) do
+    [
+      quote do
+        defp scope_results(mod, items, context) do
+          entity = context.graphism.entity
+          context = put_in(context, [:graphism, :action], :read)
+
+          {:ok,
+           Enum.filter(items, fn item ->
+             context = unquote(context_builder).from(context, %{entity => item})
+             mod.allow?(%{}, context)
+           end)}
+        end
+      end
+      | funs
+    ]
+  end
+
   defp with_resolver_auth_funs(funs, e, schema, hooks, context_builder) do
     action_resolver_auth_funs =
       (e[:actions] ++ e[:custom_actions])
@@ -1798,20 +1816,27 @@ defmodule Graphism do
      |> without_nils) ++ funs
   end
 
-  defp resolver_list_fun(e, _schema, api_module) do
+  defp resolver_list_fun(e, _schema, api_module, hooks) do
+    action_opts = action_for(e, :list)
+    scope_mod = scope_hook!(e, action_opts, :list, hooks)
+
     quote do
       def list(_, args, %{context: context}) do
         unquote(simple_auth_context(e, :list))
 
         with true <- should_list?(args, context),
-             context <- context_with_pagination(args, context) do
-          unquote(api_module).list(context)
+             context <- context_with_pagination(args, context),
+             {:ok, items} <- unquote(api_module).list(context) do
+          scope_results(unquote(scope_mod), items, context)
         end
       end
     end
   end
 
-  defp resolver_list_by_relation_funs(e, schema, api_module) do
+  defp resolver_list_by_relation_funs(e, schema, api_module, hooks) do
+    action_opts = action_for(e, :list)
+    scope_mod = scope_hook!(e, action_opts, :list, hooks)
+
     e
     |> parent_relations()
     |> Enum.map(fn rel ->
@@ -1826,21 +1851,19 @@ defmodule Graphism do
           with {:ok, unquote(var(rel))} <-
                  unquote(target[:api_module]).get_by_id(args.unquote(rel[:name])),
                true <- unquote(auth_fun_name)(unquote(var(rel)), context),
-               context <- context_with_pagination(args, context) do
-            unquote(api_module).unquote(fun_name)(
-              unquote(var(rel)).id,
-              context
-            )
+               context <- context_with_pagination(args, context),
+               {:ok, items} <- unquote(api_module).unquote(fun_name)(unquote(var(rel)).id, context) do
+            scope_results(unquote(scope_mod), items, context)
           end
         end
       end
     end)
   end
 
-  defp with_resolver_list_funs(funs, e, schema, api_module) do
+  defp with_resolver_list_funs(funs, e, schema, api_module, hooks) do
     with_entity_funs(funs, e, :list, fn ->
-      [resolver_list_fun(e, schema, api_module)] ++
-        resolver_list_by_relation_funs(e, schema, api_module)
+      [resolver_list_fun(e, schema, api_module, hooks)] ++
+        resolver_list_by_relation_funs(e, schema, api_module, hooks)
     end)
   end
 
@@ -2389,9 +2412,10 @@ defmodule Graphism do
     resolver_funs =
       []
       |> with_resolver_pagination_fun()
+      |> with_resolver_scope_results_fun(context_builder)
       |> with_resolver_auth_funs(e, schema, hooks, context_builder)
       |> with_resolver_inlined_relations_funs(e, schema, api_module)
-      |> with_resolver_list_funs(e, schema, api_module)
+      |> with_resolver_list_funs(e, schema, api_module, hooks)
       |> with_resolver_aggregate_funs(e, schema, api_module)
       |> with_resolver_read_funs(e, schema, api_module)
       |> with_resolver_create_fun(e, schema, api_module, opts)
