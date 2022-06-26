@@ -251,7 +251,7 @@ defmodule Graphism do
             (unquote_splicing(
                Enum.map(schema, fn e ->
                  schema_module = e[:schema_module]
-                 preloads = parent_preloads(e, schema) ++ child_preloads(e, schema)
+                 preloads = preloads(e, schema)
 
                  quote do
                    def query(unquote(schema_module) = schema, _) do
@@ -2490,7 +2490,7 @@ defmodule Graphism do
   end
 
   defp with_query_preload_fun(funs, e, schema) do
-    preloads = parent_preloads(e, schema) ++ child_preloads(e, schema)
+    preloads = preloads(e, schema)
 
     fun =
       case preloads do
@@ -2678,9 +2678,8 @@ defmodule Graphism do
   defp parent_preloads(e, schema) do
     e[:relations]
     |> Enum.filter(fn rel -> rel[:kind] == :belongs_to end)
-    |> Enum.reject(fn rel ->
-      rel[:target] == e[:name]
-    end)
+    |> Enum.sort_by(&optional?/1)
+    |> Enum.reject(fn rel -> rel[:target] == e[:name] end)
     |> Enum.map(fn rel ->
       parent = find_entity!(schema, rel[:target])
       ancestor_preloads = parent_preloads(parent, schema)
@@ -2689,17 +2688,56 @@ defmodule Graphism do
     end)
   end
 
+  defp optimized_preloads(preloads, parent, pracker \\ [])
+
+  defp optimized_preloads(preloads, parent, tracker) when is_list(preloads) do
+    Enum.reduce(preloads, {[], tracker}, fn
+      {p, ancestors}, {current_preloads, t} ->
+        rel = preload_relation(parent, p)
+
+        case Enum.member?(tracker, rel) do
+          false ->
+            {ancestors, t} = optimized_preloads(ancestors, p, [rel | t])
+            {[{p, Enum.reverse(ancestors)} | current_preloads], t}
+
+          true ->
+            {current_preloads, t}
+        end
+
+      p, {current_preloads, t} ->
+        rel = preload_relation(parent, p)
+
+        case Enum.member?(tracker, rel) do
+          false -> {[p | current_preloads], [rel | t]}
+          true -> {current_preloads, t}
+        end
+    end)
+  end
+
+  defp optimized_preloads(preload, parent, tracker) do
+    optimized_preloads([preload], parent, tracker)
+  end
+
+  defp preload_relation(_parent, rel), do: rel
+
+  defp preloads(e, schema) do
+    {parent_preloads, _} =
+      e
+      |> parent_preloads(schema)
+      |> optimized_preloads(e[:name])
+
+    Enum.reverse(parent_preloads) ++ child_preloads(e, schema)
+  end
+
   defp get_by_id_api_fun(e, schema_module, repo_module, schema) do
+    preloads = preloads(e, schema)
+
     quote do
       def get_by_id(id, opts \\ []) do
         preloads =
           case opts[:skip_preloads] do
-            true ->
-              []
-
-            _ ->
-              unquote(child_preloads(e, schema)) ++
-                unquote(parent_preloads(e, schema)) ++ (opts[:preload] || [])
+            true -> []
+            _ -> unquote(preloads) ++ (opts[:preload] || [])
           end
 
         case unquote(schema_module)
@@ -2730,6 +2768,8 @@ defmodule Graphism do
   end
 
   defp get_by_key_api_funs(e, schema_module, repo_module, schema) do
+    preloads = preloads(e, schema)
+
     e
     |> unique_keys()
     |> Enum.map(fn key ->
@@ -2761,12 +2801,8 @@ defmodule Graphism do
         def unquote(fun_name)(unquote_splicing(args), opts \\ []) do
           preloads =
             case opts[:skip_preloads] do
-              true ->
-                []
-
-              _ ->
-                unquote(child_preloads(e, schema)) ++
-                  unquote(parent_preloads(e, schema)) ++ (opts[:preload] || [])
+              true -> []
+              _ -> unquote(preloads) ++ (opts[:preload] || [])
             end
 
           filters = [unquote_splicing(filters)]
@@ -2786,6 +2822,8 @@ defmodule Graphism do
   end
 
   defp get_by_unique_attrs_api_funs(e, schema_module, repo_module, schema) do
+    preloads = preloads(e, schema)
+
     e[:attributes]
     |> Enum.filter(&unique?(&1))
     |> Enum.map(fn attr ->
@@ -2832,12 +2870,8 @@ defmodule Graphism do
 
           preloads =
             case opts[:skip_preloads] do
-              true ->
-                []
-
-              _ ->
-                unquote(child_preloads(e, schema)) ++
-                  unquote(parent_preloads(e, schema)) ++ (opts[:preload] || [])
+              true -> []
+              _ -> unquote(preloads) ++ (opts[:preload] || [])
             end
 
           case unquote(schema_module)
