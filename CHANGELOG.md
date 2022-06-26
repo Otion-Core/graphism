@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+* Optimized preloads - [#102](https://github.com/Gravity-Core/graphism/pull/102)
+
 ## 0.6.0 (June 24th, 2022)
 
 * Scope list results - [#101](https://github.com/Gravity-Core/graphism/pull/101)
