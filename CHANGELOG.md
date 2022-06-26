@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.6.0 (June 24th, 2022)
+
 * Scope list results - [#101](https://github.com/Gravity-Core/graphism/pull/101)
 * Json type - [#100](https://github.com/Gravity-Core/graphism/pull/100)
 * Improved schema Introspection - [#99](https://github.com/Gravity-Core/graphism/pull/99)
