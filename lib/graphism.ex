@@ -2728,7 +2728,6 @@ defmodule Graphism do
         end
       end
     end
-    |> debug_ast(e[:name] == :super_user)
   end
 
   defp get_by_id_bang_api_fun(schema_module) do
