@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-* Optimized preloads - [#102](https://github.com/Gravity-Core/graphism/pull/102)
+* Manual preloads - [#103](https://github.com/Gravity-Core/graphism/pull/103)
 
 ## 0.6.0 (June 24th, 2022)
 

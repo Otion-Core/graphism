@@ -185,64 +185,6 @@ defmodule Graphism do
         """
       end
 
-      context =
-        quote do
-          defmodule ContextBuilder do
-            @ignore_keys [:__struct__, :__cardinality__, :__field__, :__meta__]
-            @default_opts [strip: false, simple_fields: true]
-
-            def from(parent, data), do: from(parent, data, @default_opts)
-
-            def from(parent, data, opts) when is_map(data) do
-              data
-              |> Map.keys()
-              |> Enum.reject(&Enum.member?(@ignore_keys, &1))
-              |> Enum.reduce(parent, fn key, acc ->
-                value = Map.get(data, key)
-
-                case {Map.get(acc, key), is_map_value(value)} do
-                  {nil, true} ->
-                    value = as_map(value)
-                    child = from(%{}, value)
-
-                    value =
-                      case opts[:strip] do
-                        true ->
-                          Map.drop(value, Map.keys(child))
-
-                        false ->
-                          value
-                      end
-
-                    child
-                    |> Map.merge(acc)
-                    |> Map.put(key, value)
-
-                  _ ->
-                    acc
-                end
-              end)
-            end
-
-            def from(parent, _, _), do: parent
-
-            defp is_map_value(%{calendar: _, zone_abbr: _}), do: false
-            defp is_map_value(%{__owner__: _}), do: false
-            defp is_map_value(%{}), do: true
-            defp is_map_value(_), do: false
-
-            defp as_map(data) do
-              case Map.has_key?(data, :__struct__) do
-                true -> Map.from_struct(data)
-                false -> data
-              end
-              |> Map.drop(@ignore_keys)
-            end
-          end
-        end
-
-      context_builder = Module.concat([caller_module, ContextBuilder])
-
       dataloader_queries =
         quote do
           defmodule DataloaderQueries do
@@ -251,7 +193,7 @@ defmodule Graphism do
             (unquote_splicing(
                Enum.map(schema, fn e ->
                  schema_module = e[:schema_module]
-                 preloads = preloads(e, schema)
+                 preloads = preloads(e)
 
                  quote do
                    def query(unquote(schema_module) = schema, _) do
@@ -286,9 +228,9 @@ defmodule Graphism do
 
             unquote_splicing(
               Enum.flat_map(schema, fn e ->
-                entity_attributes_auth(e, default_allow_hook, context_builder) ++
-                  entity_belongs_to_relations_auth(e, default_allow_hook, context_builder, schema) ++
-                  entity_has_many_relations_auth(e, default_allow_hook, context_builder, schema)
+                entity_attributes_auth(e, default_allow_hook) ++
+                  entity_belongs_to_relations_auth(e, default_allow_hook, schema) ++
+                  entity_has_many_relations_auth(e, default_allow_hook, schema)
               end)
             )
 
@@ -348,8 +290,7 @@ defmodule Graphism do
           resolver_module(e, schema,
             repo: repo,
             hooks: hooks,
-            caller: __CALLER__,
-            context_builder: context_builder
+            caller: __CALLER__
           )
         end)
 
@@ -474,7 +415,6 @@ defmodule Graphism do
         end
 
       List.flatten([
-        context,
         dataloader_queries,
         schema_settings,
         enums_fun,
@@ -496,7 +436,7 @@ defmodule Graphism do
     end
   end
 
-  def entity_attributes_auth(e, default_allow_hook, context_builder) do
+  def entity_attributes_auth(e, default_allow_hook) do
     Enum.map(e[:attributes], fn attr ->
       entity_name = e[:name]
       field_name = attr[:name]
@@ -515,7 +455,7 @@ defmodule Graphism do
             resolution.context
             |> Map.drop([:pubsub, :loader, :__absinthe_plug__])
             |> Map.put(:graphism, graphism)
-            |> unquote(context_builder).from(%{unquote(entity_name) => resolution.source})
+            |> Map.put(unquote(entity_name), resolution.source)
 
           case unquote(mod).allow?(resolution.value, context) do
             true ->
@@ -529,7 +469,7 @@ defmodule Graphism do
     end)
   end
 
-  def entity_belongs_to_relations_auth(e, default_allow_hook, context_builder, schema) do
+  def entity_belongs_to_relations_auth(e, default_allow_hook, schema) do
     e[:relations]
     |> Enum.filter(fn rel -> rel[:kind] == :belongs_to end)
     |> Enum.map(fn rel ->
@@ -556,8 +496,8 @@ defmodule Graphism do
             resolution.context
             |> Map.drop([:pubsub, :loader, :__absinthe_plug__])
             |> Map.put(:graphism, graphism)
-            |> unquote(context_builder).from(%{unquote(field_name) => field_value})
-            |> unquote(context_builder).from(%{unquote(entity_name) => resolution.source})
+            |> Map.put(unquote(field_name), field_value)
+            |> Map.put(unquote(entity_name), resolution.source)
 
           case unquote(mod).allow?(resolution.value, context) do
             true ->
@@ -571,7 +511,7 @@ defmodule Graphism do
     end)
   end
 
-  def entity_has_many_relations_auth(e, default_allow_hook, context_builder, schema) do
+  def entity_has_many_relations_auth(e, default_allow_hook, schema) do
     e[:relations]
     |> Enum.filter(fn rel -> rel[:kind] == :has_many end)
     |> Enum.map(fn rel ->
@@ -596,11 +536,11 @@ defmodule Graphism do
             resolution.context
             |> Map.drop([:pubsub, :loader, :__absinthe_plug__])
             |> Map.put(:graphism, graphism)
-            |> unquote(context_builder).from(%{unquote(entity_name) => resolution.source})
+            |> Map.put(unquote(entity_name), resolution.source)
 
           value =
             Enum.filter(resolution.value, fn value ->
-              context = unquote(context_builder).from(context, %{unquote(field_name) => value})
+              context = Map.put(context, unquote(field_name), value)
               unquote(mod).allow?(value, context)
             end)
 
@@ -990,10 +930,9 @@ defmodule Graphism do
         use Ecto.Schema
         import Ecto.Changeset
 
-        unquote_splicing(
-          # alias all modules referenced by has_many
-          # relations
+        def entity, do: unquote(e[:name])
 
+        unquote_splicing(
           e[:relations]
           |> Enum.filter(fn rel -> rel[:kind] == :has_many end)
           |> Enum.map(fn rel ->
@@ -1129,6 +1068,10 @@ defmodule Graphism do
         unquote_splicing(relation_field_specs_ast(e, schema))
 
         def field_specs(_), do: []
+
+        unquote_splicing(relation_paths_ast(e, schema))
+
+        def paths_to(_), do: []
 
         def changeset(e, attrs) do
           changes =
@@ -1307,6 +1250,66 @@ defmodule Graphism do
       quote do
         def field_specs(unquote(Macro.escape(group))) do
           unquote(Macro.escape(rels))
+        end
+      end
+    end)
+  end
+
+  defp hierarchy(e, schema) do
+    e
+    |> parent_relations()
+    |> Enum.reject(fn rel -> rel[:target] == e[:name] end)
+    |> Enum.map(fn rel ->
+      {
+        rel[:name],
+        schema
+        |> find_entity!(rel[:target])
+        |> hierarchy(schema)
+      }
+    end)
+    |> Enum.into(%{})
+  end
+
+  defp hierarchy_paths(tree, []) when map_size(tree) == 0 do
+    []
+  end
+
+  defp hierarchy_paths(tree, context) when map_size(tree) == 0 do
+    [List.to_tuple(context)]
+  end
+
+  defp hierarchy_paths(tree, context) do
+    Enum.flat_map(tree, fn {parent, ancestors} ->
+      hierarchy_paths(ancestors, context ++ [parent])
+    end)
+  end
+
+  defp paths_to(step, paths) do
+    paths
+    |> Enum.filter(&Enum.member?(&1, step))
+    |> Enum.map(fn path ->
+      index = Enum.find_index(path, fn s -> s == step end)
+      {path, _} = Enum.split(path, index + 1)
+      path
+    end)
+    |> Enum.uniq()
+    |> Enum.sort_by(&length/1)
+  end
+
+  defp relation_paths_ast(e, schema) do
+    paths =
+      e
+      |> hierarchy(schema)
+      |> hierarchy_paths([])
+      |> Enum.map(&Tuple.to_list/1)
+
+    paths
+    |> List.flatten()
+    |> Enum.uniq()
+    |> Enum.map(fn step ->
+      quote do
+        def paths_to(unquote(step)) do
+          unquote(paths_to(step, paths))
         end
       end
     end)
@@ -1515,7 +1518,7 @@ defmodule Graphism do
     ]
   end
 
-  defp with_resolver_scope_results_fun(funs, context_builder) do
+  defp with_resolver_scope_results_fun(funs) do
     [
       quote do
         defp scope_results(mod, items, context) do
@@ -1524,7 +1527,7 @@ defmodule Graphism do
 
           {:ok,
            Enum.filter(items, fn item ->
-             context = unquote(context_builder).from(context, %{entity => item})
+             context = Map.put(context, entity, item)
              mod.allow?(%{}, context)
            end)}
         end
@@ -1533,12 +1536,12 @@ defmodule Graphism do
     ]
   end
 
-  defp with_resolver_auth_funs(funs, e, schema, hooks, context_builder) do
+  defp with_resolver_auth_funs(funs, e, schema, hooks) do
     action_resolver_auth_funs =
       (e[:actions] ++ e[:custom_actions])
       |> Enum.reject(fn {name, _} -> name == :list end)
       |> Enum.map(fn {name, opts} ->
-        resolver_auth_fun(name, opts, e, schema, hooks, context_builder)
+        resolver_auth_fun(name, opts, e, schema, hooks)
       end)
 
     funs ++
@@ -1651,7 +1654,7 @@ defmodule Graphism do
     end
   end
 
-  defp resolver_auth_fun(action, opts, e, _schema, hooks, context_builder) do
+  defp resolver_auth_fun(action, opts, e, _schema, hooks) do
     mod = allow_hook!(e, opts, action, hooks)
 
     fun_name = String.to_atom("should_#{action}?")
@@ -1674,7 +1677,7 @@ defmodule Graphism do
               end
             end),
             quote do
-              context = unquote(context_builder).from(context, data)
+              context = Map.merge(context, data)
             end
           }
       end
@@ -2046,6 +2049,8 @@ defmodule Graphism do
   end
 
   defp with_parent_entities_fetch_from_rels(rels, e, schema, opts \\ []) do
+    api_module = e[:api_module]
+
     Enum.map(rels, fn rel ->
       case computed?(rel) do
         true ->
@@ -2061,7 +2066,7 @@ defmodule Graphism do
               from = rel[:opts][:from]
 
               quote do
-                unquote(var(rel)) <- unquote(var(from)).unquote(rel[:name])
+                unquote(var(rel)) <- unquote(api_module).relation(unquote(var(from)), unquote(rel[:name]))
               end
 
             rel[:opts][:from_context] != nil ->
@@ -2089,10 +2094,10 @@ defmodule Graphism do
                         quote do
                           case Map.get(unquote(var(:args)), unquote(arg_name), nil) do
                             nil ->
-                              {:ok, unquote(var(e)).unquote(rel[:name])}
+                              {:ok, unquote(api_module).relation(unquote(var(e)), unquote(rel[:name]))}
 
                             "" ->
-                              {:ok, unquote(var(e)).unquote(rel[:name])}
+                              {:ok, unquote(api_module).relation(unquote(var(e)), unquote(rel[:name]))}
 
                             key ->
                               unquote(target[:api_module]).unquote(lookup_fun)(key)
@@ -2407,13 +2412,12 @@ defmodule Graphism do
   defp resolver_module(e, schema, opts) do
     api_module = e[:api_module]
     hooks = Keyword.fetch!(opts, :hooks)
-    context_builder = Keyword.fetch!(opts, :context_builder)
 
     resolver_funs =
       []
       |> with_resolver_pagination_fun()
-      |> with_resolver_scope_results_fun(context_builder)
-      |> with_resolver_auth_funs(e, schema, hooks, context_builder)
+      |> with_resolver_scope_results_fun()
+      |> with_resolver_auth_funs(e, schema, hooks)
       |> with_resolver_inlined_relations_funs(e, schema, api_module)
       |> with_resolver_list_funs(e, schema, api_module, hooks)
       |> with_resolver_aggregate_funs(e, schema, api_module)
@@ -2439,7 +2443,7 @@ defmodule Graphism do
 
         api_funs =
           []
-          |> with_api_convenience_functions()
+          |> with_api_convenience_functions(e, schema_module, repo_module)
           |> with_query_preload_fun(e, schema)
           |> with_optional_query_pagination_fun(e, schema_module)
           |> with_api_list_funs(e, schema_module, repo_module, schema, hooks)
@@ -2489,8 +2493,8 @@ defmodule Graphism do
     []
   end
 
-  defp with_query_preload_fun(funs, e, schema) do
-    preloads = preloads(e, schema)
+  defp with_query_preload_fun(funs, e, _schema) do
+    preloads = preloads(e)
 
     fun =
       case preloads do
@@ -2578,11 +2582,26 @@ defmodule Graphism do
     ]
   end
 
-  defp with_api_convenience_functions(funs) do
+  defp with_api_convenience_functions(funs, _e, _schema, repo_module) do
     [
       quote do
         defp maybe_id(nil), do: nil
-        defp maybe_id(e), do: e.id
+        defp maybe_id(%{id: id}), do: id
+
+        def relation(parent, child) do
+          case Map.get(parent, child) do
+            %{id: _} = rel ->
+              rel
+
+            nil ->
+              nil
+
+            _ ->
+              parent
+              |> unquote(repo_module).preload(child)
+              |> Map.get(child)
+          end
+        end
       end
       | funs
     ]
@@ -2667,70 +2686,28 @@ defmodule Graphism do
     ] ++ funs
   end
 
-  defp child_preloads(e, _schema) do
+  defp child_preloads(e) do
     e[:relations]
     |> Enum.filter(fn rel -> rel[:kind] == :has_many && rel[:opts][:preloaded] end)
     |> Enum.reduce([], fn rel, acc ->
       Keyword.put(acc, rel[:name], rel[:opts][:preload] || [])
     end)
+    |> Enum.reverse()
   end
 
-  defp parent_preloads(e, schema) do
+  defp parent_preloads(e) do
     e[:relations]
-    |> Enum.filter(fn rel -> rel[:kind] == :belongs_to end)
-    |> Enum.sort_by(&optional?/1)
-    |> Enum.reject(fn rel -> rel[:target] == e[:name] end)
-    |> Enum.map(fn rel ->
-      parent = find_entity!(schema, rel[:target])
-      ancestor_preloads = parent_preloads(parent, schema)
-      sibbling_reploads = child_preloads(parent, schema)
-      {rel[:name], ancestor_preloads ++ sibbling_reploads}
+    |> Enum.filter(fn rel -> rel[:kind] == :belongs_to && rel[:opts][:preloaded] end)
+    |> Enum.reduce([], fn rel, acc ->
+      Keyword.put(acc, rel[:name], rel[:opts][:preload] || [])
     end)
+    |> Enum.reverse()
   end
 
-  defp optimized_preloads(preloads, parent, pracker \\ [])
+  defp preloads(e), do: parent_preloads(e) ++ child_preloads(e)
 
-  defp optimized_preloads(preloads, parent, tracker) when is_list(preloads) do
-    Enum.reduce(preloads, {[], tracker}, fn
-      {p, ancestors}, {current_preloads, t} ->
-        rel = preload_relation(parent, p)
-
-        case Enum.member?(tracker, rel) do
-          false ->
-            {ancestors, t} = optimized_preloads(ancestors, p, [rel | t])
-            {[{p, Enum.reverse(ancestors)} | current_preloads], t}
-
-          true ->
-            {current_preloads, t}
-        end
-
-      p, {current_preloads, t} ->
-        rel = preload_relation(parent, p)
-
-        case Enum.member?(tracker, rel) do
-          false -> {[p | current_preloads], [rel | t]}
-          true -> {current_preloads, t}
-        end
-    end)
-  end
-
-  defp optimized_preloads(preload, parent, tracker) do
-    optimized_preloads([preload], parent, tracker)
-  end
-
-  defp preload_relation(_parent, rel), do: rel
-
-  defp preloads(e, schema) do
-    {parent_preloads, _} =
-      e
-      |> parent_preloads(schema)
-      |> optimized_preloads(e[:name])
-
-    Enum.reverse(parent_preloads) ++ child_preloads(e, schema)
-  end
-
-  defp get_by_id_api_fun(e, schema_module, repo_module, schema) do
-    preloads = preloads(e, schema)
+  defp get_by_id_api_fun(e, schema_module, repo_module, _schema) do
+    preloads = preloads(e)
 
     quote do
       def get_by_id(id, opts \\ []) do
@@ -2751,6 +2728,7 @@ defmodule Graphism do
         end
       end
     end
+    |> debug_ast(e[:name] == :super_user)
   end
 
   defp get_by_id_bang_api_fun(schema_module) do
@@ -2767,8 +2745,8 @@ defmodule Graphism do
     end
   end
 
-  defp get_by_key_api_funs(e, schema_module, repo_module, schema) do
-    preloads = preloads(e, schema)
+  defp get_by_key_api_funs(e, schema_module, repo_module, _schema) do
+    preloads = preloads(e)
 
     e
     |> unique_keys()
@@ -2821,8 +2799,8 @@ defmodule Graphism do
     end)
   end
 
-  defp get_by_unique_attrs_api_funs(e, schema_module, repo_module, schema) do
-    preloads = preloads(e, schema)
+  defp get_by_unique_attrs_api_funs(e, schema_module, repo_module, _schema) do
+    preloads = preloads(e)
 
     e[:attributes]
     |> Enum.filter(&unique?(&1))
