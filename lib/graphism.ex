@@ -812,6 +812,7 @@ defmodule Graphism do
 
   defp client_ids?(e), do: modifier?(e, :client_ids)
   defp virtual?(e), do: modifier?(e, :virtual)
+  defp refetch?(e), do: modifier?(e, :refetch)
   defp internal?(e), do: modifier?(e, :internal)
   defp private?(attr), do: modifier?(attr, :private)
 
@@ -2585,8 +2586,8 @@ defmodule Graphism do
   defp with_api_convenience_functions(funs, _e, _schema, repo_module) do
     [
       quote do
-        defp maybe_id(nil), do: nil
-        defp maybe_id(%{id: id}), do: id
+        # defp maybe_id(nil), do: nil
+        # defp maybe_id(%{id: id}), do: id
 
         def relation(parent, child) do
           case Map.get(parent, child) do
@@ -2917,22 +2918,44 @@ defmodule Graphism do
     ast
   end
 
-  defp attrs_with_parent_relations(e) do
-    e
-    |> parent_relations()
+  defp attrs_with_required_parent_relations(rels) do
+    rels
+    |> Enum.reject(&optional?/1)
     |> Enum.flat_map(fn rel ->
-      rel_key = rel[:name]
-      rel_id_key = String.to_atom("#{rel_key}_id")
+      rel_key = String.to_atom("#{rel[:name]}_id")
 
       [
         quote do
-          attrs <- Map.put(attrs, unquote(rel_key), unquote(var(rel)))
+          attrs <- Map.put(attrs, unquote(rel[:name]), unquote(var(rel)))
         end,
         quote do
-          attrs <- Map.put(attrs, unquote(rel_id_key), maybe_id(unquote(var(rel))))
+          attrs <- Map.put(attrs, unquote(rel_key), unquote(var(rel)).id)
         end
       ]
     end)
+  end
+
+  defp attrs_with_optional_parent_relations(rels) do
+    rels
+    |> Enum.filter(&optional?/1)
+    |> Enum.flat_map(fn rel ->
+      rel_key = String.to_atom("#{rel[:name]}_id")
+
+      [
+        quote do
+          attrs <- Map.put(attrs, unquote(rel[:name]), unquote(var(rel)))
+        end,
+        quote do
+          attrs <- Map.put(attrs, unquote(rel_key), if(unquote(var(rel)) != nil, do: unquote(var(rel)).id, else: nil))
+        end
+      ]
+    end)
+  end
+
+  defp attrs_with_parent_relations(e) do
+    rels = parent_relations(e)
+
+    attrs_with_required_parent_relations(rels) ++ attrs_with_optional_parent_relations(rels)
   end
 
   defp with_api_create_fun(funs, e, schema_module, repo_module, _schema) do
@@ -2947,8 +2970,12 @@ defmodule Graphism do
       end
 
     refetch =
-      quote do
-        {:ok, unquote(var(e))} <- get_by_id(unquote(var(e)).id, opts)
+      if refetch?(e) do
+        quote do
+          {:ok, unquote(var(e))} <- get_by_id(unquote(var(e)).id, opts)
+        end
+      else
+        nil
       end
 
     before_hooks = hooks(e, :before, :create)
@@ -3015,8 +3042,12 @@ defmodule Graphism do
       end
 
     refetch =
-      quote do
-        {:ok, unquote(var(e))} <- get_by_id(unquote(var(e)).id, opts)
+      if refetch?(e) do
+        quote do
+          {:ok, unquote(var(e))} <- get_by_id(unquote(var(e)).id, opts)
+        end
+      else
+        nil
       end
 
     before_hooks = hooks(e, :before, :update)
