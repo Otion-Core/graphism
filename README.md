@@ -332,6 +332,22 @@ end
 
 It is essential to provide the implementation for your custom action as a simple `:using` Graphism hook.
 
+
+### User defined lists
+
+Sometimes the default lists added by Graphism might not suit you and it is possible that you need to
+define your own queries:
+
+```elixir
+entity :post do
+  list(:my_custom_query, args: [...], using: MyBlog.Post.MyCustomQuery)
+end
+```
+
+All you need need to do is return an ok tuple with the query to execute. 
+
+Graphism will automatically add support for sorting and pagination for you.
+
 ### Lookup arguments
 
 Let's say you want to create an invite for a user. Here is a basic schema:
