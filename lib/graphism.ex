@@ -2411,7 +2411,7 @@ defmodule Graphism do
 
   defp with_api_call(action, api_module) do
     quote do
-      {:ok, items} <- unquote(api_module).unquote(action)(context)
+      {:ok, items} <- unquote(api_module).unquote(action)(args, context)
     end
   end
 
@@ -2451,7 +2451,7 @@ defmodule Graphism do
                |> flat()
                |> without_nils()
              ) do
-          unquote(api_module).unquote(action)(args)
+          unquote(api_module).unquote(action)(args, context)
         end
       end
     end
@@ -3199,8 +3199,8 @@ defmodule Graphism do
     end
 
     quote do
-      def unquote(action)(attrs) do
-        unquote(using_mod).execute(attrs)
+      def unquote(action)(args, context \\ %{}) do
+        unquote(using_mod).execute(args, context)
       end
     end
   end
@@ -3214,8 +3214,8 @@ defmodule Graphism do
     end
 
     quote do
-      def unquote(action)(context \\ %{}) do
-        with {:ok, query} <- unquote(using_mod).execute(context),
+      def unquote(action)(args, context \\ %{}) do
+        with {:ok, query} <- unquote(using_mod).execute(args, context),
              query <- unquote(scope_mod).scope(query, context),
              {:ok, query} <- maybe_paginate(query, context) do
           {:ok, unquote(repo_module).all(query)}
