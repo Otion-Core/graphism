@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+* Custom queries - [#105](https://github.com/Gravity-Core/graphism/pull/105)
 * Optional entity refetch - [#104](https://github.com/Gravity-Core/graphism/pull/104)
 * Manual preloads - [#103](https://github.com/Gravity-Core/graphism/pull/103)
 

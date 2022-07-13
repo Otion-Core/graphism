@@ -580,9 +580,11 @@ defmodule Graphism do
 
     rels = relations_from(block)
     actions = actions_from(block, name)
+    lists = lists_from(block, name)
     keys = keys_from(block)
 
     {actions, custom_actions} = split_actions(actions)
+    custom_actions = custom_actions ++ lists
 
     entity =
       [
@@ -625,6 +627,9 @@ defmodule Graphism do
   end
 
   defmacro action(_name, _opts \\ []) do
+  end
+
+  defmacro list(_name, _opts \\ []) do
   end
 
   defmacro data(name, value) do
@@ -2380,13 +2385,55 @@ defmodule Graphism do
     end)
   end
 
-  defp with_resolver_custom_funs(funs, e, schema, api_module) do
-    Enum.map(e[:custom_actions], fn {action, opts} ->
-      resolver_custom_fun(e, action, opts, api_module, schema)
-    end) ++ funs
+  defp with_resolver_custom_funs(funs, e, schema, api_module, hooks) do
+    custom_queries_funs =
+      e[:custom_actions]
+      |> Enum.filter(&custom_query?/1)
+      |> Enum.map(fn {name, opts} ->
+        resolver_custom_query_fun(e, name, opts, api_module, hooks, schema)
+      end)
+
+    custom_mutations_funs =
+      e[:custom_actions]
+      |> Enum.filter(&custom_mutation?/1)
+      |> Enum.map(fn {name, opts} ->
+        resolver_custom_mutation_fun(e, name, opts, api_module, hooks, schema)
+      end)
+
+    custom_queries_funs ++ custom_mutations_funs ++ funs
   end
 
-  defp resolver_custom_fun(e, action, opts, api_module, schema) do
+  defp with_context_with_pagination do
+    quote do
+      context <- context_with_pagination(args, context)
+    end
+  end
+
+  defp with_api_call(action, api_module) do
+    quote do
+      {:ok, items} <- unquote(api_module).unquote(action)(args, context)
+    end
+  end
+
+  defp resolver_custom_query_fun(e, action, opts, api_module, hooks, _schema) do
+    scope_mod = scope_hook!(e, opts, action, hooks)
+
+    quote do
+      def unquote(action)(_, args, %{context: context}) do
+        unquote(simple_auth_context(e, action))
+
+        with unquote_splicing([
+               with_should_invocation(e, action),
+               with_context_with_pagination(),
+               with_api_call(action, api_module)
+             ]) do
+          scope_results(unquote(scope_mod), items, context)
+        end
+      end
+    end
+  end
+
+  defp resolver_custom_mutation_fun(e, action, opts, api_module, _hooks, schema) do
     opts = Keyword.put(opts, :action, action)
 
     quote do
@@ -2404,7 +2451,7 @@ defmodule Graphism do
                |> flat()
                |> without_nils()
              ) do
-          unquote(api_module).unquote(action)(args)
+          unquote(api_module).unquote(action)(args, context)
         end
       end
     end
@@ -2426,7 +2473,7 @@ defmodule Graphism do
       |> with_resolver_create_fun(e, schema, api_module, opts)
       |> with_resolver_update_fun(e, schema, api_module, opts)
       |> with_resolver_delete_fun(e, schema, api_module)
-      |> with_resolver_custom_funs(e, schema, api_module)
+      |> with_resolver_custom_funs(e, schema, api_module, hooks)
       |> List.flatten()
 
     quote do
@@ -2437,11 +2484,11 @@ defmodule Graphism do
   end
 
   defp api_module(e, schema, hooks, opts) do
+    schema_module = e[:schema_module]
+    repo_module = opts[:repo]
+
     case virtual?(e) do
       false ->
-        schema_module = e[:schema_module]
-        repo_module = opts[:repo]
-
         api_funs =
           []
           |> with_api_convenience_functions(e, schema_module, repo_module)
@@ -2454,7 +2501,7 @@ defmodule Graphism do
           |> with_api_batch_create_fun(e, schema_module, repo_module, schema)
           |> with_api_update_fun(e, schema_module, repo_module, schema)
           |> with_api_delete_fun(e, schema_module, repo_module, schema)
-          |> with_api_custom_funs(e)
+          |> with_api_custom_funs(e, schema_module, repo_module, schema, hooks)
           |> List.flatten()
 
         quote do
@@ -2479,7 +2526,7 @@ defmodule Graphism do
 
         api_funs =
           []
-          |> with_api_custom_funs(e)
+          |> with_api_custom_funs(e, schema_module, repo_module, schema, hooks)
           |> List.flatten()
 
         quote do
@@ -3126,13 +3173,25 @@ defmodule Graphism do
     ]
   end
 
-  defp with_api_custom_funs(funs, e) do
-    Enum.map(e[:custom_actions], fn {action, opts} ->
-      api_custom_fun(e, action, opts)
-    end) ++ funs
+  defp with_api_custom_funs(funs, e, schema_module, repo_module, schema, hooks) do
+    custom_action_funs =
+      e[:custom_actions]
+      |> Enum.filter(&custom_mutation?/1)
+      |> Enum.map(fn {action, opts} ->
+        api_custom_action_fun(e, action, opts, schema_module, repo_module, schema, hooks)
+      end)
+
+    custom_list_funs =
+      e[:custom_actions]
+      |> Enum.filter(&custom_query?/1)
+      |> Enum.map(fn {action, opts} ->
+        api_custom_list_fun(e, action, opts, schema_module, repo_module, schema, hooks)
+      end)
+
+    funs ++ custom_action_funs ++ custom_list_funs
   end
 
-  defp api_custom_fun(e, action, opts) do
+  defp api_custom_action_fun(e, action, opts, _schema_module, _repo_module, _schema, _hooks) do
     using_mod = opts[:using]
 
     unless using_mod do
@@ -3140,8 +3199,27 @@ defmodule Graphism do
     end
 
     quote do
-      def unquote(action)(attrs) do
-        unquote(using_mod).execute(attrs)
+      def unquote(action)(args, context \\ %{}) do
+        unquote(using_mod).execute(args, context)
+      end
+    end
+  end
+
+  defp api_custom_list_fun(e, action, opts, _schema_module, repo_module, _schema, hooks) do
+    using_mod = opts[:using]
+    scope_mod = scope_hook!(e, opts, action, hooks)
+
+    unless using_mod do
+      raise "custom action #{action} of #{e[:name]} does not define a :using option"
+    end
+
+    quote do
+      def unquote(action)(args, context \\ %{}) do
+        with {:ok, query} <- unquote(using_mod).execute(args, context),
+             query <- unquote(scope_mod).scope(query, context),
+             {:ok, query} <- maybe_paginate(query, context) do
+          {:ok, unquote(repo_module).all(query)}
+        end
       end
     end
   end
@@ -3385,54 +3463,68 @@ defmodule Graphism do
   end
 
   defp single_graphql_queries(e, schema) do
-    case action?(e, :read) do
-      true ->
+    queries =
+      if action?(e, :read) do
+        [
+          graphql_query_find_by_id(e, schema),
+          graphql_query_find_by_unique_fields(e, schema),
+          graphql_query_find_by_keys(e, schema)
+        ]
+      else
+        []
+      end
+
+    case queries ++ graphql_single_result_custom_queries(e) do
+      [] ->
+        nil
+
+      queries ->
         quote do
           object unquote(String.to_atom("#{e[:name]}_queries")) do
-            (unquote_splicing(
-               List.flatten([
-                 graphql_query_find_by_id(e, schema),
-                 graphql_query_find_by_unique_fields(e, schema),
-                 graphql_query_find_by_keys(e, schema)
-               ])
-             ))
+            (unquote_splicing(List.flatten(queries)))
           end
         end
-
-      false ->
-        nil
     end
   end
 
   defp multiple_graphql_queries(e, schema) do
-    case action?(e, :list) do
-      true ->
+    queries =
+      if action?(e, :list) do
+        [
+          graphql_query_list_all(e, schema),
+          graphql_query_aggregate_all(e, schema),
+          graphql_query_find_by_parent_queries(e, schema),
+          graphql_query_aggregate_by_parent_queries(e, schema)
+        ]
+      else
+        []
+      end
+
+    case queries ++ graphql_multiple_results_custom_queries(e) do
+      [] ->
+        nil
+
+      queries ->
         quote do
           object unquote(String.to_atom("#{e[:plural]}_queries")) do
-            (unquote_splicing(
-               List.flatten([
-                 graphql_query_list_all(e, schema),
-                 graphql_query_aggregate_all(e, schema),
-                 graphql_query_find_by_parent_queries(e, schema),
-                 graphql_query_aggregate_by_parent_queries(e, schema)
-               ])
-             ))
+            (unquote_splicing(List.flatten(queries)))
           end
         end
-
-      false ->
-        nil
     end
   end
+
+  @pagination_args [
+    limit: {:integer, :optional},
+    offset: {:integer, :optional},
+    sort_by: {:string, :optional},
+    sort_direction: {:asc_desc, :optional}
+  ]
 
   defp graphql_query_list_all(e, _schema) do
     quote do
       @desc "List all " <> unquote("#{e[:plural_display_name]}")
       field :all, list_of(unquote(e[:name])) do
-        arg(:limit, :integer)
-        arg(:offset, :integer)
-        arg(:sort_by, :string)
-        arg(:sort_direction, :asc_desc)
+        unquote_splicing(graphql_args(@pagination_args, e))
         resolve(&unquote(e[:resolver_module]).list/3)
       end
     end
@@ -3545,10 +3637,7 @@ defmodule Graphism do
         field unquote(String.to_atom("by_#{rel[:name]}")),
               list_of(unquote(e[:name])) do
           arg(unquote(rel[:name]), non_null(:id))
-          arg(:limit, :integer)
-          arg(:offset, :integer)
-          arg(:sort_by, :string)
-          arg(:sort_direction, :asc_desc)
+          unquote_splicing(graphql_args(@pagination_args, e))
           resolve(&(unquote(e[:resolver_module]).unquote(String.to_atom("list_by_#{rel[:name]}")) / 3))
         end
       end
@@ -3632,7 +3721,7 @@ defmodule Graphism do
                    with_entity_action(e, :create, fn _ -> graphql_create_mutation(e, schema) end),
                    with_entity_action(e, :update, fn _ -> graphql_update_mutation(e, schema) end),
                    with_entity_action(e, :delete, fn _ -> graphql_delete_mutation(e, schema) end)
-                 ] ++ graphql_custom_mutations(e, schema)
+                 ] ++ graphql_custom_mutations(e)
                )
                |> without_nils()
              ))
@@ -3641,10 +3730,36 @@ defmodule Graphism do
     end
   end
 
-  defp graphql_custom_mutations(e, schema) do
+  defp custom_action_kind(opts), do: Keyword.get(opts, :kind, :mutation)
+
+  defp custom_mutation?({_name, opts}), do: :mutation == custom_action_kind(opts)
+  defp custom_query?({_name, opts}), do: :query == custom_action_kind(opts)
+  defp produces_single_result?(action), do: !produces_multiple_results?(action)
+  defp produces_multiple_results?({_name, opts}), do: match?({:list, _}, opts[:produces])
+
+  defp graphql_custom_mutations(e) do
     e[:custom_actions]
+    |> Enum.filter(&custom_mutation?/1)
     |> Enum.map(fn {action, opts} ->
-      graphql_custom_mutation(e, action, opts, schema)
+      graphql_custom_query_or_mutation(e, action, opts)
+    end)
+  end
+
+  defp graphql_multiple_results_custom_queries(e) do
+    e[:custom_actions]
+    |> Enum.filter(&custom_query?/1)
+    |> Enum.filter(&produces_multiple_results?/1)
+    |> Enum.map(fn {action, opts} ->
+      graphql_custom_query_or_mutation(e, action, opts, @pagination_args)
+    end)
+  end
+
+  defp graphql_single_result_custom_queries(e) do
+    e[:custom_actions]
+    |> Enum.filter(&custom_query?/1)
+    |> Enum.filter(&produces_single_result?/1)
+    |> Enum.map(fn {action, opts} ->
+      graphql_custom_query_or_mutation(e, action, opts)
     end)
   end
 
@@ -3874,10 +3989,38 @@ defmodule Graphism do
     end
   end
 
-  defp graphql_custom_mutation(e, action, opts, _schema) do
-    args = opts[:args]
+  defp graphql_args(args, e) do
+    Enum.map(args, fn
+      {arg, {kind, :optional}} ->
+        quote do
+          arg(unquote(arg), unquote(kind))
+        end
+
+      {arg, kind} ->
+        quote do
+          arg(unquote(arg), non_null(unquote(kind)))
+        end
+
+      arg ->
+        kind =
+          case entity_attribute(e, arg) do
+            nil ->
+              :id
+
+            attr ->
+              attr_graphql_type(attr)
+          end
+
+        quote do
+          arg(unquote(arg), non_null(unquote(kind)))
+        end
+    end)
+  end
+
+  defp graphql_custom_query_or_mutation(e, action, opts, extra_args \\ []) do
+    args = opts[:args] ++ extra_args
     produces = opts[:produces]
-    desc = opts[:desc] || "Custom action"
+    desc = opts[:desc] || opts[:description] || "Custom action"
 
     quote do
       @desc unquote(desc)
@@ -3895,33 +4038,7 @@ defmodule Graphism do
                   end
               end
             ) do
-        (unquote_splicing(
-           Enum.map(args, fn
-             {arg, {kind, :optional}} ->
-               quote do
-                 arg(unquote(arg), unquote(kind))
-               end
-
-             {arg, kind} ->
-               quote do
-                 arg(unquote(arg), non_null(unquote(kind)))
-               end
-
-             arg ->
-               kind =
-                 case entity_attribute(e, arg) do
-                   nil ->
-                     :id
-
-                   attr ->
-                     attr_graphql_type(attr)
-                 end
-
-               quote do
-                 arg(unquote(arg), non_null(unquote(kind)))
-               end
-           end)
-         ))
+        (unquote_splicing(graphql_args(args, e)))
 
         resolve(unquote(graphql_resolver(e, action)))
       end
@@ -4199,5 +4316,33 @@ defmodule Graphism do
       |> with_action_hook(:scope)
 
     [name: name, opts: opts]
+  end
+
+  defp lists_from({:__block__, _, actions}, entity_name) do
+    actions
+    |> Enum.reduce([], fn list, acc ->
+      case list_from(list, entity_name) do
+        nil ->
+          acc
+
+        list ->
+          Keyword.put(acc, list[:name], list[:opts])
+      end
+    end)
+    |> without_nils()
+  end
+
+  defp lists_from(_, _), do: []
+
+  defp list_from({:list, _, [name, opts]}, entity_name),
+    do: list_from(name, opts, entity_name)
+
+  defp list_from({:list, _, [name]}, entity_name), do: list_from(name, [], entity_name)
+  defp list_from(_, _), do: nil
+
+  defp list_from(name, opts, entity_name) do
+    action_from(name, opts, entity_name)
+    |> put_in([:opts, :kind], :query)
+    |> put_in([:opts, :produces], {:list, entity_name})
   end
 end
