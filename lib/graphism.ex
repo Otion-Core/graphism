@@ -457,13 +457,17 @@ defmodule Graphism do
             |> Map.put(:graphism, graphism)
             |> Map.put(unquote(entity_name), resolution.source)
 
-          case unquote(mod).allow?(resolution.value, context) do
-            true ->
-              resolution
+          meta = %{entity: unquote(entity_name), kind: :attribute, value: unquote(field_name)}
 
-            false ->
-              Absinthe.Resolution.put_result(resolution, {:error, :unauthorized})
-          end
+          :telemetry.span([:graphism, :allow], meta, fn ->
+            {case unquote(mod).allow?(resolution.value, context) do
+               true ->
+                 resolution
+
+               false ->
+                 Absinthe.Resolution.put_result(resolution, {:error, :unauthorized})
+             end, meta}
+          end)
         end
       end
     end)
@@ -499,13 +503,17 @@ defmodule Graphism do
             |> Map.put(unquote(field_name), field_value)
             |> Map.put(unquote(entity_name), resolution.source)
 
-          case unquote(mod).allow?(resolution.value, context) do
-            true ->
-              resolution
+          meta = %{entity: unquote(entity_name), kind: :relation, value: unquote(field_name)}
 
-            false ->
-              Absinthe.Resolution.put_result(resolution, {:error, :unauthorized})
-          end
+          :telemetry.span([:graphism, :allow], meta, fn ->
+            {case unquote(mod).allow?(resolution.value, context) do
+               true ->
+                 resolution
+
+               false ->
+                 Absinthe.Resolution.put_result(resolution, {:error, :unauthorized})
+             end, meta}
+          end)
         end
       end
     end)
@@ -538,10 +546,15 @@ defmodule Graphism do
             |> Map.put(:graphism, graphism)
             |> Map.put(unquote(entity_name), resolution.source)
 
+          meta = %{entity: unquote(entity_name), kind: :relation, value: unquote(field_name)}
+
           value =
             Enum.filter(resolution.value, fn value ->
               context = Map.put(context, unquote(field_name), value)
-              unquote(mod).allow?(value, context)
+
+              :telemetry.span([:graphism, :allow], meta, fn ->
+                {unquote(mod).allow?(value, context), meta}
+              end)
             end)
 
           %{resolution | value: value}
@@ -1530,11 +1543,15 @@ defmodule Graphism do
         defp scope_results(mod, items, context) do
           entity = context.graphism.entity
           context = put_in(context, [:graphism, :action], :read)
+          meta = %{entity: entity, kind: :scope, value: :undefined}
 
           {:ok,
            Enum.filter(items, fn item ->
              context = Map.put(context, entity, item)
-             mod.allow?(%{}, context)
+
+             :telemetry.span([:graphism, :allow], meta, fn ->
+               {mod.allow?(%{}, context), meta}
+             end)
            end)}
         end
       end
@@ -1583,15 +1600,15 @@ defmodule Graphism do
     end
   end
 
-  defp auth_mod_invocation(mod) do
+  defp auth_mod_invocation(mod, e, fun_name) do
     quote do
-      case unquote(mod).allow?(args, context) do
-        true ->
-          true
+      meta = %{entity: unquote(e[:name]), kind: :action, value: unquote(fun_name)}
 
-        false ->
-          {:error, :unauthorized}
-      end
+      :telemetry.span([:graphism, :allow], meta, fn ->
+        {with false <- unquote(mod).allow?(args, context) do
+           {:error, :unauthorized}
+         end, meta}
+      end)
     end
   end
 
@@ -1620,7 +1637,7 @@ defmodule Graphism do
 
     quote do
       defp should_list?(args, context) do
-        unquote(auth_mod_invocation(mod))
+        unquote(auth_mod_invocation(mod, e, :should_list))
       end
     end
   end
@@ -1636,7 +1653,7 @@ defmodule Graphism do
       ast =
         quote do
           defp unquote(fun_name)(unquote(var(rel)) = args, context) do
-            unquote(auth_mod_invocation(mod))
+            unquote(auth_mod_invocation(mod, e, fun_name))
           end
         end
 
@@ -1699,7 +1716,7 @@ defmodule Graphism do
              empty_data,
              data_with_args,
              context_with_data,
-             auth_mod_invocation(mod)
+             auth_mod_invocation(mod, e, fun_name)
            ]
            |> flat()
            |> without_nils()
@@ -2494,6 +2511,7 @@ defmodule Graphism do
           |> with_api_convenience_functions(e, schema_module, repo_module)
           |> with_query_preload_fun(e, schema)
           |> with_optional_query_pagination_fun(e, schema_module)
+          |> with_query_scope_fun(e)
           |> with_api_list_funs(e, schema_module, repo_module, schema, hooks)
           |> with_api_aggregate_funs(e, schema_module, repo_module, schema, hooks)
           |> with_api_read_funs(e, schema_module, repo_module, schema)
@@ -2630,12 +2648,24 @@ defmodule Graphism do
     ]
   end
 
+  defp with_query_scope_fun(funs, e) do
+    [
+      quote do
+        defp scoped_query(query, mod, context, name) do
+          meta = %{entity: unquote(e[:name]), kind: :scope, value: name}
+
+          :telemetry.span([:graphism, :scope], meta, fn ->
+            {mod.scope(query, context), meta}
+          end)
+        end
+      end
+      | funs
+    ]
+  end
+
   defp with_api_convenience_functions(funs, _e, _schema, repo_module) do
     [
       quote do
-        # defp maybe_id(nil), do: nil
-        # defp maybe_id(%{id: id}), do: id
-
         def relation(parent, child) do
           case Map.get(parent, child) do
             %{id: _} = rel ->
@@ -2664,7 +2694,7 @@ defmodule Graphism do
         def list(context \\ %{}) do
           query = from(unquote(var(e)) in unquote(schema_module))
 
-          with query <- unquote(scope_mod).scope(query, context),
+          with query <- scoped_query(query, unquote(scope_mod), context, :list),
                {:ok, query} <- maybe_paginate(query, context),
                {:ok, query} <- maybe_with_preloads(query) do
             {:ok, unquote(repo_module).all(query)}
@@ -2674,13 +2704,15 @@ defmodule Graphism do
       | e[:relations]
         |> Enum.filter(fn rel -> rel[:kind] == :belongs_to end)
         |> Enum.map(fn rel ->
+          fun_name = String.to_atom("list_by_#{rel[:name]}")
+
           quote do
-            def unquote(String.to_atom("list_by_#{rel[:name]}"))(id, context \\ %{}) do
+            def unquote(fun_name)(id, context \\ %{}) do
               query =
                 from(unquote(var(rel)) in unquote(schema_module))
                 |> where([q], q.unquote(String.to_atom("#{rel[:name]}_id")) == ^id)
 
-              with query <- unquote(scope_mod).scope(query, context),
+              with query <- scoped_query(query, unquote(scope_mod), context, unquote(fun_name)),
                    {:ok, query} <- maybe_paginate(query, context),
                    {:ok, query} <- maybe_with_preloads(query) do
                 {:ok, unquote(repo_module).all(query)}
@@ -2706,7 +2738,7 @@ defmodule Graphism do
               unquote(query_opts)
             )
 
-          with query <- unquote(scope_mod).scope(query, context) do
+          with query <- scoped_query(query, unquote(scope_mod), context, :aggregate) do
             {:ok, %{count: unquote(repo_module).aggregate(query, :count)}}
           end
         end
@@ -2714,10 +2746,10 @@ defmodule Graphism do
       | e[:relations]
         |> Enum.filter(fn rel -> rel[:kind] == :belongs_to end)
         |> Enum.map(fn rel ->
-          name = String.to_atom("aggregate_by_#{rel[:name]}")
+          fun_name = String.to_atom("aggregate_by_#{rel[:name]}")
 
           quote do
-            def unquote(name)(id, context \\ %{}) do
+            def unquote(fun_name)(id, context \\ %{}) do
               query =
                 from(
                   unquote(var(rel)) in unquote(schema_module),
@@ -2725,7 +2757,7 @@ defmodule Graphism do
                 )
                 |> where([q], q.unquote(String.to_atom("#{rel[:name]}_id")) == ^id)
 
-              with query <- unquote(scope_mod).scope(query, context) do
+              with query <- scoped_query(query, unquote(scope_mod), context, unquote(fun_name)) do
                 {:ok, %{count: unquote(repo_module).aggregate(query, :count)}}
               end
             end
@@ -3216,7 +3248,7 @@ defmodule Graphism do
     quote do
       def unquote(action)(args, context \\ %{}) do
         with {:ok, query} <- unquote(using_mod).execute(args, context),
-             query <- unquote(scope_mod).scope(query, context),
+             query <- scoped_query(query, unquote(scope_mod), context, unquote(action)),
              {:ok, query} <- maybe_paginate(query, context) do
           {:ok, unquote(repo_module).all(query)}
         end
