@@ -593,7 +593,7 @@ Graphism instruments calls to external authorization modules and publishes the f
 * `[:graphism, :scope, :stop]` when scoping queries.
 
 For both events, the measurement is `:duration` in native unit. The telemetry metadata has keys `:entity`, `:kind` (eg,
-``:action`, `:attribute`, `:relation`) and `value` (eg, `:list` or `:posts`).
+`:action`, `:attribute`, `:relation`) and `value` (eg, `:list` or `:posts`).
 
 You can also subscribe to the `[:start]` and `[:exception]` events. Internally, Graphism relies on `:telemetry.span/3`.
 
