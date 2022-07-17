@@ -587,7 +587,7 @@ And you will get the data back as json:
 
 ### Telemetry
 
-Graphism emits telementry events for various operations and publishes their duration:
+Graphism emits telemetry events for various operations and publishes their duration:
 
 | event | measurement | metadata |
 | --- | --- | --- |
