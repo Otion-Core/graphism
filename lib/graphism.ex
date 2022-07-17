@@ -2663,7 +2663,7 @@ defmodule Graphism do
     ]
   end
 
-  defp with_api_convenience_functions(funs, _e, _schema, repo_module) do
+  defp with_api_convenience_functions(funs, e, _schema, repo_module) do
     [
       quote do
         def relation(parent, child) do
@@ -2675,9 +2675,13 @@ defmodule Graphism do
               nil
 
             _ ->
-              parent
-              |> unquote(repo_module).preload(child)
-              |> Map.get(child)
+              meta = %{entity: unquote(e[:name]), relation: child}
+
+              :telemetry.execute([:graphism, :relation], meta, fn ->
+                {parent
+                 |> unquote(repo_module).preload(child)
+                 |> Map.get(child), meta}
+              end)
           end
         end
       end

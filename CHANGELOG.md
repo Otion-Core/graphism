@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+* Relation telemetry - [#108](https://github.com/Gravity-Core/graphism/pull/108)
 * Authorization telemetry - [#107](https://github.com/Gravity-Core/graphism/pull/107)
 * Custom queries - [#105](https://github.com/Gravity-Core/graphism/pull/105)
 * Optional entity refetch - [#104](https://github.com/Gravity-Core/graphism/pull/104)
