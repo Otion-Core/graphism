@@ -587,14 +587,12 @@ And you will get the data back as json:
 
 ### Telemetry
 
-Graphism instruments calls to external authorization modules and publishes the following telemetry events:
+Graphism emits telementry events for various operations and publishes their duration:
 
-* `[:graphism, :allow, :stop]` when checking access to actions, attributes or relations.
-* `[:graphism, :scope, :stop]` when scoping queries.
+| event | measurement | metadata |
+| --- | --- | --- |
+| `[:graphism, :allow, :stop]` | `:duration` | `:entity`, `:kind`, `:value` |
+| `[:graphism, :scope, :stop]` | `:duration` | `:entity`, `:kind`, `:value` |
+| `[:graphism, :relation, :stop]` | `:duration` | `:entity`, `:relation` |
 
-For both events, the measurement is `:duration` in native unit. The telemetry metadata has keys `:entity`, `:kind` (eg,
-`:action`, `:attribute`, `:relation`) and `value` (eg, `:list` or `:posts`).
-
-You can also subscribe to the `[:start]` and `[:exception]` events. Internally, Graphism relies on `:telemetry.span/3`.
-
-
+You can also subscribe to the `[:start]` and `[:exception]` events, since Graphism relies on `:telemetry.span/3`.
