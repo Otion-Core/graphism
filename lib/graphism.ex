@@ -2677,7 +2677,7 @@ defmodule Graphism do
             _ ->
               meta = %{entity: unquote(e[:name]), relation: child}
 
-              :telemetry.execute([:graphism, :relation], meta, fn ->
+              :telemetry.span([:graphism, :relation], meta, fn ->
                 {parent
                  |> unquote(repo_module).preload(child)
                  |> Map.get(child), meta}
