@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+* Fix index creation order - [#110](https://github.com/Gravity-Core/graphism/pull/110)
 * Custom aggregations - [#109](https://github.com/Gravity-Core/graphism/pull/109)
 * Relation telemetry - [#108](https://github.com/Gravity-Core/graphism/pull/108)
 * Authorization telemetry - [#107](https://github.com/Gravity-Core/graphism/pull/107)

@@ -1188,16 +1188,7 @@ defmodule Graphism.Migrations do
     end)
   end
 
-  defp table_index(tables, tab, inverse \\ false) do
-    tables =
-      case inverse do
-        false ->
-          tables
-
-        true ->
-          Enum.reverse(tables)
-      end
-
+  defp table_index(tables, tab) do
     case Enum.find(tables, fn {t, _} -> tab == t end) do
       nil ->
         -1000
@@ -1223,28 +1214,28 @@ defmodule Graphism.Migrations do
     |> Enum.map(fn m ->
       case {m[:action], m[:kind]} do
         {:create, :table} ->
-          {m, table_index(tables, m[:table])}
+          {m, 1000 + table_index(tables, m[:table])}
 
         {:drop, :table} ->
-          {m, table_index(tables, m[:table], true)}
+          {m, -1000 - table_index(tables, m[:table])}
 
         {:alter, :table} ->
           {m, 0}
 
         {:create, :enum} ->
-          {m, 1000}
+          {m, 2000}
 
         {:drop, :enum} ->
-          {m, -1000}
+          {m, -2000}
 
         {:alter, :enum} ->
           {m, 1000}
 
         {:create, :index} ->
-          {m, 1000}
+          {m, 500}
 
         {:drop, :index} ->
-          {m, -1000}
+          {m, -500}
 
         _ ->
           raise "error: unknown kind in #{inspect(m)}. Expecting one of: [:table, :enum, :index]. This is a bug!"
