@@ -2406,8 +2406,11 @@ defmodule Graphism do
     custom_queries_funs =
       e[:custom_actions]
       |> Enum.filter(&custom_query?/1)
-      |> Enum.map(fn {name, opts} ->
-        resolver_custom_query_fun(e, name, opts, api_module, hooks, schema)
+      |> Enum.flat_map(fn {name, opts} ->
+        [
+          resolver_custom_query_fun(e, name, opts, api_module, hooks, schema),
+          resolver_custom_query_aggregate_fun(e, name, opts, api_module, hooks, schema)
+        ]
       end)
 
     custom_mutations_funs =
@@ -2445,6 +2448,22 @@ defmodule Graphism do
                with_api_call(action, api_module)
              ]) do
           scope_results(unquote(scope_mod), items, context)
+        end
+      end
+    end
+  end
+
+  defp resolver_custom_query_aggregate_fun(e, action, _opts, api_module, _hooks, _schema) do
+    fun_name = String.to_atom("aggregate_#{action}")
+
+    quote do
+      def unquote(fun_name)(_, args, %{context: context}) do
+        unquote(simple_auth_context(e, action))
+
+        with unquote_splicing([
+               with_should_invocation(e, action)
+             ]) do
+          unquote(api_module).unquote(fun_name)(args, context)
         end
       end
     end
@@ -3220,8 +3239,11 @@ defmodule Graphism do
     custom_list_funs =
       e[:custom_actions]
       |> Enum.filter(&custom_query?/1)
-      |> Enum.map(fn {action, opts} ->
-        api_custom_list_fun(e, action, opts, schema_module, repo_module, schema, hooks)
+      |> Enum.flat_map(fn {action, opts} ->
+        [
+          api_custom_list_fun(e, action, opts, schema_module, repo_module, schema, hooks),
+          api_custom_list_aggregate_fun(e, action, opts, schema_module, repo_module, schema, hooks)
+        ]
       end)
 
     funs ++ custom_action_funs ++ custom_list_funs
@@ -3255,6 +3277,25 @@ defmodule Graphism do
              query <- scoped_query(query, unquote(scope_mod), context, unquote(action)),
              {:ok, query} <- maybe_paginate(query, context) do
           {:ok, unquote(repo_module).all(query)}
+        end
+      end
+    end
+  end
+
+  defp api_custom_list_aggregate_fun(e, action, opts, _schema_module, repo_module, _schema, hooks) do
+    fun_name = String.to_atom("aggregate_#{action}")
+    using_mod = opts[:using]
+    scope_mod = scope_hook!(e, opts, action, hooks)
+
+    unless using_mod do
+      raise "custom action #{action} of #{e[:name]} does not define a :using option"
+    end
+
+    quote do
+      def unquote(fun_name)(args, context \\ %{}) do
+        with {:ok, query} <- unquote(using_mod).execute(args, context),
+             query <- scoped_query(query, unquote(scope_mod), context, unquote(action)) do
+          {:ok, %{count: unquote(repo_module).aggregate(query, :count)}}
         end
       end
     end
@@ -3785,8 +3826,11 @@ defmodule Graphism do
     e[:custom_actions]
     |> Enum.filter(&custom_query?/1)
     |> Enum.filter(&produces_multiple_results?/1)
-    |> Enum.map(fn {action, opts} ->
-      graphql_custom_query_or_mutation(e, action, opts, @pagination_args)
+    |> Enum.flat_map(fn {action, opts} ->
+      [
+        graphql_custom_query_or_mutation(e, action, opts, @pagination_args),
+        graphql_custom_aggregation_query(e, action, opts)
+      ]
     end)
   end
 
@@ -4077,6 +4121,20 @@ defmodule Graphism do
         (unquote_splicing(graphql_args(args, e)))
 
         resolve(unquote(graphql_resolver(e, action)))
+      end
+    end
+  end
+
+  defp graphql_custom_aggregation_query(e, action, opts) do
+    name = String.to_atom("aggregate_#{action}")
+    args = opts[:args]
+    desc = opts[:desc] || opts[:description] || "Custom aggregation"
+
+    quote do
+      @desc unquote(desc)
+      field unquote(name), non_null(:aggregate) do
+        (unquote_splicing(graphql_args(args, e)))
+        resolve(&(unquote(e[:resolver_module]).unquote(name) / 3))
       end
     end
   end
