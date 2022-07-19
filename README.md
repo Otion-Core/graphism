@@ -449,6 +449,12 @@ end
 In the above example, we are saying that a user can belong to an organisation only once. Graphism will take
 care of creating the right indices and GraphQL queries for you.
 
+### Non unique keys
+
+Composite keys can be turned into indices by setting `unique: false`.
+
+In this case, Graphism will automatically generate list and aggregate queries for you.
+
 ### Hooks
 
 Hooks are a mechanism in Graphism for customization. They are implemented as standard OTP behaviours.

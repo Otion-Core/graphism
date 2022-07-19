@@ -154,6 +154,16 @@ defmodule Graphism.Entity do
     rel
   end
 
+  def column_name!(_e, :inserted_at), do: :inserted_at
+  def column_name!(_e, :updated_at), do: :updated_at
+
+  def column_name!(e, name) do
+    case attribute_or_relation(e, name) do
+      {:attribute, _} -> name
+      {:relation, rel} -> Keyword.fetch!(rel, :column)
+    end
+  end
+
   def attribute_or_relation(e, name) do
     case attribute(e, name) do
       nil ->
@@ -182,11 +192,24 @@ defmodule Graphism.Entity do
     end)
   end
 
-  def unique_keys(e), do: Enum.filter(e[:keys], fn k -> k[:unique] end)
+  def unique_keys(e), do: Enum.filter(e[:keys], &unique_key?/1)
+  def non_unique_keys(e), do: Enum.reject(e[:keys], &unique_key?/1)
+
+  defp unique_key?(k), do: k[:unique]
 
   def get_by_key_fun_name(key) do
     fields = Enum.join(key[:fields], "_and_")
     String.to_atom("get_by_#{fields}")
+  end
+
+  def list_by_key_fun_name(key) do
+    fields = Enum.join(key[:fields], "_and_")
+    String.to_atom("list_by_#{fields}")
+  end
+
+  def aggregate_by_key_fun_name(key) do
+    fields = Enum.join(key[:fields], "_and_")
+    String.to_atom("aggregate_by_#{fields}")
   end
 
   def custom_mutations(e) do

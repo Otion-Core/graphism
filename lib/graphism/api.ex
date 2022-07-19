@@ -15,8 +15,8 @@ defmodule Graphism.Api do
           |> with_query_preload_fun(e, schema)
           |> with_optional_query_pagination_fun(e, schema_module)
           |> with_query_scope_fun(e)
-          |> with_api_list_funs(e, schema_module, repo_module, schema, hooks)
-          |> with_api_aggregate_funs(e, schema_module, repo_module, schema, hooks)
+          |> with_api_list_funs(e, schema_module, repo_module, hooks)
+          |> with_api_aggregate_funs(e, schema_module, repo_module, hooks)
           |> with_api_read_funs(e, schema_module, repo_module, schema)
           |> with_api_create_fun(e, schema_module, repo_module, schema)
           |> with_api_batch_create_fun(e, schema_module, repo_module, schema)
@@ -176,8 +176,8 @@ defmodule Graphism.Api do
   defp with_query_scope_fun(funs, e) do
     [
       quote do
-        defp scoped_query(query, mod, context, name) do
-          meta = %{entity: unquote(e[:name]), kind: :scope, value: name}
+        defp scoped_query(query, mod, context, telemetry_name) do
+          meta = %{entity: unquote(e[:name]), kind: :scope, value: telemetry_name}
 
           :telemetry.span([:graphism, :scope], meta, fn ->
             {mod.scope(query, context), meta}
@@ -188,93 +188,299 @@ defmodule Graphism.Api do
     ]
   end
 
-  defp with_api_list_funs(funs, e, schema_module, repo_module, _schema, hooks) do
+  defp with_api_list_funs(funs, e, schema_module, repo_module, hooks) do
     action_opts = Entity.action_for(e, :list)
     scope_mod = Entity.scope_hook!(e, action_opts, :list, hooks)
 
-    [
-      quote do
-        def list(context \\ %{}) do
-          meta = %{entity: unquote(e[:name]), action: :list}
-
-          :telemetry.span([:graphism, :api], meta, fn ->
-            {do_list(context), meta}
-          end)
-        end
-
-        defp do_list(context) do
-          query = from(unquote(Ast.var(e)) in unquote(schema_module))
-
-          with query <- scoped_query(query, unquote(scope_mod), context, :list),
-               {:ok, query} <- maybe_paginate(query, context),
-               {:ok, query} <- maybe_with_preloads(query) do
-            {:ok, unquote(repo_module).all(query)}
-          end
-        end
-      end
-      | e[:relations]
-        |> Enum.filter(fn rel -> rel[:kind] == :belongs_to end)
-        |> Enum.map(fn rel ->
-          fun_name = String.to_atom("list_by_#{rel[:name]}")
-
-          quote do
-            def unquote(fun_name)(id, context \\ %{}) do
-              query =
-                from(unquote(Ast.var(rel)) in unquote(schema_module))
-                |> where([q], q.unquote(String.to_atom("#{rel[:name]}_id")) == ^id)
-
-              with query <- scoped_query(query, unquote(scope_mod), context, unquote(fun_name)),
-                   {:ok, query} <- maybe_paginate(query, context),
-                   {:ok, query} <- maybe_with_preloads(query) do
-                {:ok, unquote(repo_module).all(query)}
-              end
-            end
-          end
-        end)
-    ] ++ funs
+    List.flatten([
+      api_list_all_funs(e, schema_module, repo_module, scope_mod),
+      api_list_by_parent_funs(e, schema_module, repo_module, scope_mod),
+      api_list_by_non_unique_key_funs(e, schema_module, repo_module, scope_mod)
+    ]) ++ funs
   end
 
-  defp with_api_aggregate_funs(funs, e, schema_module, repo_module, schema, hooks) do
-    query_opts = entity_aggregate_query_opts(e, schema)
+  defp api_list_all_funs(e, schema_module, repo_module, scope_mod) do
+    [
+      api_list_all_instrumented_fun(e),
+      api_list_all_internal_fun(e, schema_module, repo_module, scope_mod)
+    ]
+  end
 
+  defp api_list_all_instrumented_fun(e) do
+    fun_name = :list
+    internal_fun_name = internal_fun_name(:list)
+
+    quote do
+      def unquote(fun_name)(context \\ %{}) do
+        meta = %{entity: unquote(e[:name]), action: unquote(fun_name)}
+
+        :telemetry.span([:graphism, :api], meta, fn ->
+          {unquote(internal_fun_name)(context), meta}
+        end)
+      end
+    end
+  end
+
+  defp api_list_all_internal_fun(e, schema_module, repo_module, scope_mod) do
+    fun_name = :list
+    internal_fun_name = internal_fun_name(:list)
+
+    quote do
+      defp unquote(internal_fun_name)(context) do
+        query = from(unquote(Ast.var(e)) in unquote(schema_module))
+
+        with query <- scoped_query(query, unquote(scope_mod), context, unquote(fun_name)),
+             {:ok, query} <- maybe_paginate(query, context),
+             {:ok, query} <- maybe_with_preloads(query) do
+          {:ok, unquote(repo_module).all(query)}
+        end
+      end
+    end
+  end
+
+  defp api_list_by_parent_funs(e, schema_module, repo_module, scope_mod) do
+    e[:relations]
+    |> Enum.filter(fn rel -> rel[:kind] == :belongs_to end)
+    |> Enum.flat_map(fn rel ->
+      [
+        api_list_by_parent_instrumented_fun(rel, e),
+        api_list_by_parent_internal_fun(rel, e, schema_module, repo_module, scope_mod)
+      ]
+    end)
+  end
+
+  defp api_list_by_parent_instrumented_fun(rel, e) do
+    fun_name = String.to_atom("list_by_#{rel[:name]}")
+    internal_fun_name = internal_fun_name(fun_name)
+
+    quote do
+      def unquote(fun_name)(id, context \\ %{}) do
+        meta = %{entity: unquote(e[:name]), action: unquote(fun_name)}
+
+        :telemetry.span([:graphism, :api], meta, fn ->
+          {unquote(internal_fun_name)(id, context), meta}
+        end)
+      end
+    end
+  end
+
+  defp api_list_by_parent_internal_fun(rel, _e, schema_module, repo_module, scope_mod) do
+    fun_name = String.to_atom("list_by_#{rel[:name]}")
+    internal_fun_name = internal_fun_name(fun_name)
+
+    quote do
+      defp unquote(internal_fun_name)(id, context \\ %{}) do
+        query =
+          from(unquote(Ast.var(rel)) in unquote(schema_module))
+          |> where([q], q.unquote(String.to_atom("#{rel[:name]}_id")) == ^id)
+
+        with query <- scoped_query(query, unquote(scope_mod), context, unquote(fun_name)),
+             {:ok, query} <- maybe_paginate(query, context),
+             {:ok, query} <- maybe_with_preloads(query) do
+          {:ok, unquote(repo_module).all(query)}
+        end
+      end
+    end
+  end
+
+  defp api_list_by_non_unique_key_funs(e, schema_module, repo_module, scope_mod) do
+    e
+    |> Entity.non_unique_keys()
+    |> Enum.flat_map(fn key ->
+      [
+        api_list_by_non_unique_key_instrumented_fun(e, key),
+        api_list_by_non_unique_key_internal_fun(e, key, schema_module, repo_module, scope_mod)
+      ]
+    end)
+  end
+
+  defp api_list_by_non_unique_key_instrumented_fun(e, key) do
+    args = key[:fields]
+    fun_name = Entity.list_by_key_fun_name(key)
+    internal_fun_name = internal_fun_name(fun_name)
+
+    quote do
+      def unquote(fun_name)(unquote_splicing(Ast.vars(args)), context \\ %{}) do
+        meta = %{entity: unquote(e[:name]), action: unquote(fun_name)}
+
+        :telemetry.span([:graphism, :api], meta, fn ->
+          {unquote(internal_fun_name)(unquote_splicing(Ast.vars(args)), context), meta}
+        end)
+      end
+    end
+  end
+
+  defp api_list_by_non_unique_key_internal_fun(e, key, schema_module, repo_module, scope_mod) do
+    args = key[:fields]
+    fun_name = Entity.list_by_key_fun_name(key)
+    internal_fun_name = internal_fun_name(fun_name)
+
+    filters =
+      Enum.map(args, fn field ->
+        column_name = Entity.column_name!(e, field)
+
+        quote do
+          query = where(query, [q], q.unquote(column_name) == ^unquote(Ast.var(field)))
+        end
+      end)
+
+    quote do
+      defp unquote(internal_fun_name)(unquote_splicing(Ast.vars(args)), context) do
+        query = from(unquote(Ast.var(e)) in unquote(schema_module))
+        unquote_splicing(filters)
+
+        with query <- scoped_query(query, unquote(scope_mod), context, unquote(fun_name)),
+             {:ok, query} <- maybe_paginate(query, context),
+             {:ok, query} <- maybe_with_preloads(query) do
+          {:ok, unquote(repo_module).all(query)}
+        end
+      end
+    end
+  end
+
+  defp with_api_aggregate_funs(funs, e, schema_module, repo_module, hooks) do
     action_opts = Entity.action_for(e, :list)
     scope_mod = Entity.scope_hook!(e, action_opts, :list, hooks)
 
-    [
-      quote do
-        def aggregate(context \\ %{}) do
-          query =
-            from(
-              unquote(Ast.var(e)) in unquote(schema_module),
-              unquote(query_opts)
-            )
+    List.flatten([
+      api_aggregate_all_funs(e, schema_module, repo_module, scope_mod),
+      api_aggregate_by_parent_funs(e, schema_module, repo_module, scope_mod),
+      api_aggregate_by_non_unique_key_funs(e, schema_module, repo_module, scope_mod)
+    ]) ++ funs
+  end
 
-          with query <- scoped_query(query, unquote(scope_mod), context, :aggregate) do
-            {:ok, %{count: unquote(repo_module).aggregate(query, :count)}}
-          end
+  defp api_aggregate_all_funs(e, schema_module, repo_module, scope_mod) do
+    [
+      api_aggregate_all_instrumented_fun(e),
+      api_aggregate_all_internal_fun(e, schema_module, repo_module, scope_mod)
+    ]
+  end
+
+  defp api_aggregate_all_instrumented_fun(e) do
+    fun_name = :aggregate
+    internal_fun_name = internal_fun_name(fun_name)
+
+    quote do
+      def unquote(fun_name)(context \\ %{}) do
+        meta = %{entity: unquote(e[:name]), action: unquote(fun_name)}
+
+        :telemetry.span([:graphism, :api], meta, fn ->
+          {unquote(internal_fun_name)(context), meta}
+        end)
+      end
+    end
+  end
+
+  defp api_aggregate_all_internal_fun(e, schema_module, repo_module, scope_mod) do
+    fun_name = :aggregate
+    internal_fun_name = internal_fun_name(fun_name)
+
+    quote do
+      defp unquote(internal_fun_name)(context \\ %{}) do
+        query = from(unquote(Ast.var(e)) in unquote(schema_module))
+
+        with query <- scoped_query(query, unquote(scope_mod), context, unquote(fun_name)) do
+          {:ok, %{count: unquote(repo_module).aggregate(query, :count)}}
         end
       end
-      | e[:relations]
-        |> Enum.filter(fn rel -> rel[:kind] == :belongs_to end)
-        |> Enum.map(fn rel ->
-          fun_name = String.to_atom("aggregate_by_#{rel[:name]}")
+    end
+  end
 
-          quote do
-            def unquote(fun_name)(id, context \\ %{}) do
-              query =
-                from(
-                  unquote(Ast.var(rel)) in unquote(schema_module),
-                  unquote(query_opts)
-                )
-                |> where([q], q.unquote(String.to_atom("#{rel[:name]}_id")) == ^id)
+  defp api_aggregate_by_parent_funs(e, schema_module, repo_module, scope_mod) do
+    e
+    |> Entity.parent_relations()
+    |> Enum.flat_map(fn rel ->
+      [
+        api_aggregate_by_parent_instrumented_fun(e, rel),
+        api_aggregate_by_parent_internal_fun(e, rel, schema_module, repo_module, scope_mod)
+      ]
+    end)
+  end
 
-              with query <- scoped_query(query, unquote(scope_mod), context, unquote(fun_name)) do
-                {:ok, %{count: unquote(repo_module).aggregate(query, :count)}}
-              end
-            end
-          end
+  defp api_aggregate_by_parent_instrumented_fun(e, rel) do
+    fun_name = String.to_atom("aggregate_by_#{rel[:name]}")
+    internal_fun_name = internal_fun_name(fun_name)
+
+    quote do
+      def unquote(fun_name)(id, context \\ %{}) do
+        meta = %{entity: unquote(e[:name]), action: unquote(fun_name)}
+
+        :telemetry.span([:graphism, :api], meta, fn ->
+          {unquote(internal_fun_name)(id, context), meta}
         end)
-    ] ++ funs
+      end
+    end
+  end
+
+  defp api_aggregate_by_parent_internal_fun(e, rel, schema_module, repo_module, scope_mod) do
+    fun_name = String.to_atom("aggregate_by_#{rel[:name]}")
+    internal_fun_name = internal_fun_name(fun_name)
+    column_name = Entity.column_name!(e, rel[:name])
+
+    quote do
+      defp unquote(internal_fun_name)(id, context) do
+        query =
+          from(unquote(Ast.var(rel)) in unquote(schema_module))
+          |> where([q], q.unquote(column_name) == ^id)
+
+        with query <- scoped_query(query, unquote(scope_mod), context, unquote(fun_name)) do
+          {:ok, %{count: unquote(repo_module).aggregate(query, :count)}}
+        end
+      end
+    end
+  end
+
+  defp api_aggregate_by_non_unique_key_funs(e, schema_module, repo_module, scope_mod) do
+    e
+    |> Entity.non_unique_keys()
+    |> Enum.map(fn key ->
+      [
+        api_aggregate_by_non_unique_key_instrumented_fun(e, key),
+        api_aggregate_by_non_unique_key_internal_fun(e, key, schema_module, repo_module, scope_mod)
+      ]
+    end)
+  end
+
+  defp api_aggregate_by_non_unique_key_instrumented_fun(e, key) do
+    args = key[:fields]
+    fun_name = Entity.aggregate_by_key_fun_name(key)
+    internal_fun_name = internal_fun_name(fun_name)
+
+    quote do
+      def unquote(fun_name)(unquote_splicing(Ast.vars(args)), context \\ %{}) do
+        meta = %{entity: unquote(e[:name]), action: unquote(fun_name)}
+
+        :telemetry.span([:graphism, :api], meta, fn ->
+          {unquote(internal_fun_name)(unquote_splicing(Ast.vars(args)), context), meta}
+        end)
+      end
+    end
+  end
+
+  defp api_aggregate_by_non_unique_key_internal_fun(e, key, schema_module, repo_module, scope_mod) do
+    args = key[:fields]
+    fun_name = Entity.aggregate_by_key_fun_name(key)
+    internal_fun_name = internal_fun_name(fun_name)
+
+    filters =
+      Enum.map(args, fn field ->
+        column_name = Entity.column_name!(e, field)
+
+        quote do
+          query = where(query, [q], q.unquote(column_name) == ^unquote(Ast.var(field)))
+        end
+      end)
+
+    quote do
+      defp unquote(internal_fun_name)(unquote_splicing(Ast.vars(args)), context) do
+        query = from(unquote(Ast.var(e)) in unquote(schema_module))
+        unquote_splicing(filters)
+
+        with query <- scoped_query(query, unquote(scope_mod), context, unquote(fun_name)) do
+          {:ok, %{count: unquote(repo_module).aggregate(query, :count)}}
+        end
+      end
+    end
   end
 
   defp with_api_read_funs(funs, e, schema_module, repo_module, schema) do
@@ -527,10 +733,6 @@ defmodule Graphism.Api do
     end
   end
 
-  defp entity_aggregate_query_opts(_e, _schema) do
-    []
-  end
-
   defp get_by_id_api_fun(e, schema_module, repo_module, _schema) do
     preloads = Entity.preloads(e)
 
@@ -689,4 +891,6 @@ defmodule Graphism.Api do
       end
     end)
   end
+
+  defp internal_fun_name(fun_name), do: String.to_atom("do_#{fun_name}")
 end
