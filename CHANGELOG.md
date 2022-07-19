@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+* More robust constraint migrations - [#115](https://github.com/Gravity-Core/graphism/pull/115)
+
 ## 0.7.1 (July 19th, 2022)
 
 * Queries for non unique keys - [#114](https://github.com/Gravity-Core/graphism/pull/114)

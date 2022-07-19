@@ -1015,6 +1015,7 @@ defmodule Graphism.Migrations do
     []
   end
 
+  defp parse_up({:drop_if_exists, _, [{:constraint, _, _}]}), do: []
   defp parse_up({:drop, _, [{:constraint, _, _}]}), do: []
 
   defp parse_up(other) do
@@ -1419,7 +1420,7 @@ defmodule Graphism.Migrations do
 
   defp drop_constraint_ast(table, %{column: column}) do
     constraint = "#{table}_#{column}_fkey"
-    {:drop, [], [{:constraint, [], [table, constraint]}]}
+    {:drop_if_exists, [], [{:constraint, [], [table, constraint]}]}
   end
 
   defp timestamps_ast() do
