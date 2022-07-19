@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.7.2 (July 20th, 2022)
+
 * Getting started guide - [#116](https://github.com/Gravity-Core/graphism/pull/116)
 * More robust constraint migrations - [#115](https://github.com/Gravity-Core/graphism/pull/115)
 
