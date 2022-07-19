@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+* Simplified auth on has_many relations - [#112](https://github.com/Gravity-Core/graphism/pull/112)
+
 ## 0.7.0 (July 19th, 2022)
 
 * Split code into smaller modules - [#111](https://github.com/Gravity-Core/graphism/pull/111) 

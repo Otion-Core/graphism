@@ -216,30 +216,26 @@ defmodule Graphism.Graphql do
       field_name = rel[:name]
       target_entity = rel[:target]
       mod = rel[:opts][:allow] || allow_hook
-      schema_module = e[:schema_module]
       target_schema_module = Entity.find_entity!(schema, target_entity)[:schema_module]
 
       quote do
         defp auth(unquote(entity_name), unquote(field_name), resolution) do
           graphism = %{
-            entity: unquote(entity_name),
-            field: unquote(field_name),
-            target_entity: unquote(target_entity),
-            schema: unquote(schema_module),
-            target_schema: unquote(target_schema_module)
+            action: :read,
+            entity: unquote(target_entity),
+            schema: unquote(target_schema_module)
           }
 
           context =
             resolution.context
             |> Map.drop([:pubsub, :loader, :__absinthe_plug__])
             |> Map.put(:graphism, graphism)
-            |> Map.put(unquote(entity_name), resolution.source)
 
           meta = %{entity: unquote(entity_name), kind: :relation, value: unquote(field_name)}
 
           value =
             Enum.filter(resolution.value, fn value ->
-              context = Map.put(context, unquote(field_name), value)
+              context = Map.put(context, unquote(target_entity), value)
 
               :telemetry.span([:graphism, :allow], meta, fn ->
                 {unquote(mod).allow?(value, context), meta}
