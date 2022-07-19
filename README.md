@@ -22,25 +22,26 @@ $ mix new --sup blog
 Include Graphism in our list of dependencies:
 
 ```elixir
-def deps do
-  [
-    {:graphism, git: "https://github.com/gravity-core/graphism.git", tag: "v0.7.1"}
-  ]
-end
-```
+# mix.exs
+defmodule Blog.MixProject do
 
-and add it to the list of extra applications:
+  def deps do
+    [
+      ...
+      {:graphism, git: "https://github.com/gravity-core/graphism.git", tag: "v0.7.2"}
+    ]
+  end
 
-```elixir
- def application do
+  def application do
     [
       extra_applications: [:graphism],
       ...
     ]
   end
+end
 ```
 
-Fetch all dependencies and compile the project:
+then compile the project:
 
 ```bash
 $ mix deps.get
@@ -49,7 +50,13 @@ $ mix compile
 
 ### Database setup
 
-Configure a new Ecto repo module:
+First of all, let's create a new Postgres database:
+
+```bash
+$ createdb blog
+```
+
+Then, let's define a new Ecto repo:
 
 ```elixir
 # lib/blog/repo.ex
@@ -67,7 +74,7 @@ import Config
 config :blog, ecto_repos: [Blog.Repo]
 ```
 
-and connect it to our database:
+and let's connect it to our database:
 
 ```elixir
 # config/runtime.exs
@@ -76,18 +83,12 @@ import Config
 config :blog, Blog.Repo, database: "blog"
 ```
 
-Lets not forget to actually create the Postgres database!
-
-```bash
-$ createdb blog
-```
-
-Finally, let's start the repo when our application starts:
+Finally, let's add the repo to our supervision tree:
 
 ```elixir
 # lib/blog/application.ex
 defmodule Blog.Application do
-  ...
+ 
   def start(_type, _args) do
     children = [
       ...
@@ -95,7 +96,9 @@ defmodule Blog.Application do
       ...
     ]
   ...
-end`
+  end
+
+end
 ```
 
 At this point, the project should be able to boot:
@@ -104,7 +107,7 @@ At this point, the project should be able to boot:
 $ iex -S mix
 ```
 
-and it should be able to connect okay:
+and it should be able to connect to our database without issues:
 
 ```
 iex> Ecto.Adapters.SQL.query(Blog.Repo, "SELECT 1")
@@ -112,7 +115,7 @@ iex> Ecto.Adapters.SQL.query(Blog.Repo, "SELECT 1")
 
 ### Our first Graphism schema
 
-At this point, we are ready to bootstrap our first Graphism schema.
+We are now ready to define our first Graphism schema.
 
 ```elixir
 # lib/blog/schema.ex
@@ -145,22 +148,20 @@ end
 
 ### Migrating the database
 
-With this, we are almost ready to migrate our database. 
-
-But first, we need to tell Graphism about our schema.
+Let's tell Graphism about our schema:
 
 ```elixir
 # config/config.exs
 config :graphism, schema: Blog.Schema
 ```
 
-Then, let Graphism figure out things:
+Then, let Graphism figure out which migrations we need:
 
 ```bash
 $ mix graphism.migrations
 ```
 
-Have a look at the generated migration in your `priv/repo/migrations` folder. 
+Have a look at the generated file in your `priv/repo/migrations` folder. 
 
 Then, as usual, migrate the database with:
 
@@ -170,7 +171,16 @@ $ mix ecto.migrate
 
 If everything went okay, you should have a new `blog` table in your database with some default columns such a `uuid` primary key and timestamps. 
 
-### Exposing our api
+In case you wonder, run again:
+
+```bash
+$ mix graphism.migrations
+```
+
+and observe no new migrations are being generated :)
+
+
+### Publishing our api
 
 For simplicity, lets stick with `Cowboy` and `Plug`:
 
@@ -247,7 +257,7 @@ query {
 }
 ```
 
-Don't forget to check the Documentation Explorer, in order to learn about all the queries and mutations that Graphism automatically generated for us.
+Don't forget to check the Documentation Explorer and discover all the queries and mutations that Graphism automatically generated for us.
 
 ### Next steps
 
@@ -299,14 +309,14 @@ defmodule Blog.Schema do
 end
 ```
 
-Don't forget to run 
+Compile the project, then run: 
 
 ```bash
 $ mix graphism.migrations
 $ mix ecto.migrate
 ```
 
-Start your IEx session, visit the GraphiQL UI, and start testing these brand new features that you just **didn't need to
+Start your IEx session, refresh the GraphiQL UI, and start testing these brand new features that you just **didn't need to
 code**:
 
 ```graphql
@@ -332,7 +342,9 @@ mutation {
   }
 ```
 
-Keep reading if you want to learn about all the features offered by Graphism.
+That is all for this guide!
+
+Keep reading if you want to learn about all the features offered by Graphism...
 
 ## Schema Features
 
