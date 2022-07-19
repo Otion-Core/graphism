@@ -467,7 +467,9 @@ defmodule Graphism.Graphql do
           graphql_query_list_all(e, schema),
           graphql_query_aggregate_all(e, schema),
           graphql_query_find_by_parent_queries(e, schema),
-          graphql_query_aggregate_by_parent_queries(e, schema)
+          graphql_query_aggregate_by_parent_queries(e, schema),
+          graphql_list_by_non_unique_key_queries(e, schema),
+          graphql_aggregate_by_non_unique_key_queries(e, schema)
         ]
       else
         []
@@ -621,23 +623,7 @@ defmodule Graphism.Graphql do
       description = "Find a single #{e[:display_name]} given its #{fields}"
       resolver_fun = Entity.get_by_key_fun_name(key)
       query_name = resolver_fun |> to_string() |> String.replace("get_", "") |> String.to_atom()
-
-      args =
-        Enum.map(key[:fields], fn name ->
-          case Entity.attribute_or_relation(e, name) do
-            {:attribute, attr} ->
-              kind = Entity.attr_graphql_type(attr)
-
-              quote do
-                arg(unquote(name), non_null(unquote(kind)))
-              end
-
-            {:relation, _} ->
-              quote do
-                arg(unquote(name), non_null(:id))
-              end
-          end
-        end)
+      args = graphql_query_by_key_args(key, e)
 
       quote do
         @desc unquote(description)
@@ -645,6 +631,24 @@ defmodule Graphism.Graphql do
           unquote_splicing(args)
           resolve(&(unquote(e[:resolver_module]).unquote(resolver_fun) / 3))
         end
+      end
+    end)
+  end
+
+  defp graphql_query_by_key_args(key, e) do
+    Enum.map(key[:fields], fn name ->
+      case Entity.attribute_or_relation(e, name) do
+        {:attribute, attr} ->
+          kind = Entity.attr_graphql_type(attr)
+
+          quote do
+            arg(unquote(name), non_null(unquote(kind)))
+          end
+
+        {:relation, _} ->
+          quote do
+            arg(unquote(name), non_null(:id))
+          end
       end
     end)
   end
@@ -679,6 +683,47 @@ defmodule Graphism.Graphql do
         field unquote(name), non_null(:aggregate) do
           arg(unquote(rel[:name]), non_null(:id))
           resolve(&(unquote(e[:resolver_module]).unquote(name) / 3))
+        end
+      end
+    end)
+  end
+
+  defp graphql_list_by_non_unique_key_queries(e, _schema) do
+    e
+    |> Entity.non_unique_keys()
+    |> Enum.map(fn key ->
+      fields = Enum.join(key[:fields], " and ")
+      description = "Find all #{e[:plural_display_name]} given their #{fields}"
+      resolver_fun = Entity.list_by_key_fun_name(key)
+      query_name = resolver_fun |> to_string() |> String.replace("list_", "") |> String.to_atom()
+      args = graphql_query_by_key_args(key, e)
+
+      quote do
+        @desc unquote(description)
+        field unquote(query_name), list_of(unquote(e[:name])) do
+          unquote_splicing(args)
+          unquote_splicing(graphql_args(@pagination_args, e))
+          resolve(&(unquote(e[:resolver_module]).unquote(resolver_fun) / 3))
+        end
+      end
+    end)
+  end
+
+  defp graphql_aggregate_by_non_unique_key_queries(e, _schema) do
+    e
+    |> Entity.non_unique_keys()
+    |> Enum.map(fn key ->
+      fields = Enum.join(key[:fields], " and ")
+      description = "Aggregate all #{e[:plural_display_name]} given their #{fields}"
+      resolver_fun = Entity.aggregate_by_key_fun_name(key)
+      query_name = resolver_fun
+      args = graphql_query_by_key_args(key, e)
+
+      quote do
+        @desc unquote(description)
+        field unquote(query_name), non_null(:aggregate) do
+          unquote_splicing(args)
+          resolve(&(unquote(e[:resolver_module]).unquote(resolver_fun) / 3))
         end
       end
     end)

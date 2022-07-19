@@ -2,7 +2,8 @@
 
 ## Unreleased
 
-* Simplified auth on has_many relations - [#112](https://github.com/Gravity-Core/graphism/pull/112)
+* Queries for non unique keys - [#114](https://github.com/Gravity-Core/graphism/pull/114)
+* Simplified auth on has_many relations - [#113](https://github.com/Gravity-Core/graphism/pull/113)
 
 ## 0.7.0 (July 19th, 2022)
 
