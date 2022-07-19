@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.7.0 (July 19th, 2022)
+
 * Split code into smaller modules - [#111](https://github.com/Gravity-Core/graphism/pull/111) 
 * Fix index creation order - [#110](https://github.com/Gravity-Core/graphism/pull/110)
 * Custom aggregations - [#109](https://github.com/Gravity-Core/graphism/pull/109)
