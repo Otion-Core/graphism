@@ -139,7 +139,7 @@ defmodule Graphism.Resolver do
 
       ast =
         quote do
-          defp unquote(fun_name)(unquote(Ast.var(rel)) = unquote(Ast.var(:args)), context) do
+          defp unquote(fun_name)(unquote(Ast.var(:args)), context) do
             unquote(auth_mod_invocation(mod, e, fun_name))
           end
         end

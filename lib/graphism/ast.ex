@@ -12,7 +12,7 @@ defmodule Graphism.Ast do
     ast
   end
 
-  def var(name) when is_atom(name), do: Macro.var(name, __MODULE__)
+  def var(name) when is_atom(name), do: Macro.var(name, nil)
   def var(other), do: other |> Keyword.fetch!(:name) |> var()
 
   def vars(names), do: Enum.map(names, &var(&1))
