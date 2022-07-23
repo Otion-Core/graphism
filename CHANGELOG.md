@@ -2,7 +2,10 @@
 
 ## Unreleased
 
-* Better support for aliases in computed relations - [#118](https://github.com/Gravity-Core/graphism/pull/118)
+## 0.7.3 (July 23rd, 2022)
+
+* Introduce mix graphism.new - [#118](https://github.com/Gravity-Core/graphism/pull/118)
+* Better support for aliases in computed relations - [#120](https://github.com/Gravity-Core/graphism/pull/120)
 * Ast improvements - [#117](https://github.com/Gravity-Core/graphism/pull/117)
 
 ## 0.7.2 (July 20th, 2022)
