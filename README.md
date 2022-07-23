@@ -9,238 +9,51 @@ Please make sure your read and honour [our contributing guide](CONTRIBUTING.md).
 
 ## Getting started
 
-### Setting up your project
+### Configure mix
 
-These steps will setup a minimal Elixir project for a blogging application:
-
-```bash
-$ mix new --sup blog
-```
-
-### Add Graphism to your project
-
-Include Graphism in our list of dependencies:
-
-```elixir
-# mix.exs
-defmodule Blog.MixProject do
-
-  def deps do
-    [
-      ...
-      {:graphism, git: "https://github.com/gravity-core/graphism.git", tag: "v0.7.2"}
-    ]
-  end
-
-  def application do
-    [
-      extra_applications: [:graphism],
-      ...
-    ]
-  end
-end
-```
-
-then compile the project:
+Install the `graphism.new` mix task:
 
 ```bash
+$ wget https://github.com/pedro-gutierrez/graphism_new/raw/main/graphism_new-0.1.0.ez
+$ mix archive.install ./graphism_new-0.1.0.ez
+```
+
+### Create your project
+
+```bash
+$ mix graphism.new blog
+```
+
+and run the following commands:
+
+```bash
+$ cd blog
 $ mix deps.get
 $ mix compile
+$ mix graphism.migrations
+$ mix ecto.create
+$ mix ecto.migrate
 ```
 
-### Database setup
+### Run it
 
-First of all, let's create a new Postgres database:
+The generated projects contains a sample schema with a single `user` entity.
 
-```bash
-$ createdb blog
-```
-
-Then, let's define a new Ecto repo:
-
-```elixir
-# lib/blog/repo.ex
-defmodule Blog.Repo do
-  use Ecto.Repo, 
-    :otp_app: :blog, 
-    adapter: Ecto.Adapters.Postgres
-end
-```
-
-```elixir
-# config/config.exs
-import Config
-
-config :blog, ecto_repos: [Blog.Repo]
-```
-
-and let's connect it to our database:
-
-```elixir
-# config/runtime.exs
-import Config
-
-config :blog, Blog.Repo, database: "blog"
-```
-
-Finally, let's add the repo to our supervision tree:
-
-```elixir
-# lib/blog/application.ex
-defmodule Blog.Application do
- 
-  def start(_type, _args) do
-    children = [
-      ...
-      Blog.Repo, # <-- add this
-      ...
-    ]
-  ...
-  end
-
-end
-```
-
-At this point, the project should be able to boot:
+Start the project:
 
 ```bash
 $ iex -S mix
 ```
 
-and it should be able to connect to our database without issues:
+Then visit [http://localhost:4001/graphiql](http://localhost:4001/graphiql) and start sending GraphQL requests:
 
-```
-iex> Ecto.Adapters.SQL.query(Blog.Repo, "SELECT 1")
-```
-
-### Our first Graphism schema
-
-We are now ready to define our first Graphism schema.
-
-```elixir
-# lib/blog/schema.ex
-defmodule Blog.Schema do
-  use Graphism, repo: Blog.Repo
-  
-  allow(Blog.Auth)
-
-  entity :blog do
-    string(:name)
-    
-    action(:read)
-    action(:list)
-    action(:create)
-    action(:update)
-    action(:delete)
-  end   
-end
-```
-
-For now, our authorization module will simply allow access to everything:
-
-```elixir
-# lib/blog/auth.ex
-defmodule Blog.Auth do
-  def allow?(_data, _context), do: true    
-  def scope(query, _context), do: query  
-end
-```
-
-### Migrating the database
-
-Let's tell Graphism about our schema:
-
-```elixir
-# config/config.exs
-config :graphism, schema: Blog.Schema
-```
-
-Then, let Graphism figure out which migrations we need:
-
-```bash
-$ mix graphism.migrations
-```
-
-Have a look at the generated file in your `priv/repo/migrations` folder. 
-
-Then, as usual, migrate the database with:
-
-```bash
-$ mix ecto.migrate
-```
-
-If everything went okay, you should have a new `blog` table in your database with some default columns such a `uuid` primary key and timestamps. 
-
-In case you wonder, run again:
-
-```bash
-$ mix graphism.migrations
-```
-
-and observe no new migrations are being generated :)
-
-
-### Publishing our api
-
-For simplicity, lets stick with `Cowboy` and `Plug`:
-
-```elixir
-# lib/blog/api.ex
-defmodule Blog.Api do
-  def child_spec(_) do
-    Plug.Cowboy.child_spec(
-      scheme: :http,
-      plug: Blog.Endpoint,
-      options: [port: 4001]
-    )
-  end
-end
-```
-
-and a minimal endpoint:
-
-```elixir
-# lib/blog/endpoint.ex
-defmodule Blog.Endpoint do
-  use Plug.Router
-
-  use Graphism.Plug, schema: Blog.Schema
-
-  get "/health" do
-    send_resp(conn, 200, "")
-  end
-
-  match _ do
-    send_resp(conn, 404, "")
-  end
-end
-```
-
-Let's not forget to add the api to our supervision tree:
-
-```elixir
-# lib/blog/application.ex
-defmodule Blog.Application do
-  ...
-  def start(_type, _args) do
-    children = [
-      ...
-      Blog.Repo,
-      Blog.Api  # <-- add this
-      ...
-    ]
-  ...
-end`
-```
-
-Start the IEx with `mix -S mix` and, visit http://localhost:4001/graphiql and start playing:
 
 ```graphql
 mutation {
-  blog{
-    create(name: "My first blog") {
+  user{
+    create(email: "john@farscape.com") {
       id,
-      name
+      email
     }
   }
 }
@@ -248,10 +61,10 @@ mutation {
 
 ```graphql
 query {
-  blogs {
+  users {
     all {
       id,
-      name
+      email 
     }
   }
 }
@@ -261,30 +74,20 @@ Don't forget to check the Documentation Explorer and discover all the queries an
 
 ### Next steps
 
-Our project is now up and running !
-
 From here, you might want to add new entities, attributes, unique keys, relations, custom actions etc.. to your schema.
 
-For example:
+For example, add the `:blog` and `:post` entities right after the existing `:user` entity:
 
 ```elixir
 # lib/blog/schema.ex
 defmodule Blog.Schema do
   use Graphism, repo: Blog.Repo
 
-  allow(Blog.Auth)
-
-  entity :user do
-    unique(string(:email))
-    has_many(:blogs)
-
-    action(:create)
-    action(:list)
-  end
+  ...
 
   entity :blog do
     unique(string(:name))
-    optional(belongs_to(:user, as: :owner))
+    belongs_to(:user, as: :owner)
     has_many(:posts)
 
     action(:read)
@@ -298,7 +101,7 @@ defmodule Blog.Schema do
     string(:title)
     text(:content)
     belongs_to(:blog)
-    optional(belongs_to(:user, as: :author, from: :blog))
+    belongs_to(:user, as: :author, from: [:blog, :owner])
 
     action(:read)
     action(:list)
@@ -309,21 +112,32 @@ defmodule Blog.Schema do
 end
 ```
 
-Compile the project, then run: 
+Migrate your database: 
 
 ```bash
 $ mix graphism.migrations
 $ mix ecto.migrate
 ```
 
-Start your IEx session, refresh the GraphiQL UI, and start testing these brand new features that you just **didn't need to
-code**:
+Start your project:
+
+```bash
+$ iex -S mix
+```
+
+Then refresh the GraphiQL UI, and start testing these brand new features that you just **didn't need to
+code** (note: the uuids below will be different for you):
 
 ```graphql
 mutation {
-  user {
-    create(email:"foo@bar.com") {
-      id
+  blog {
+    create(name: "John's blog", owner: "353e3684-8a55-482e-9bab-b91149db03bb") {
+      id,
+      name,
+      owner {
+        id,
+        email
+      }
     }
   }
 }
@@ -331,15 +145,26 @@ mutation {
 
 ```graphql
 mutation {
-  blog{
-    create(name: "My second blog", owner: "353e3684-8a55-482e-9bab-b91149db03bb") {
+  post {
+    create(title: "Fetch the comfy chair", content: "It’s just like a VCR, except easier", blog: "b53a63c8-1400-4ca1-92eb-62cb3e73a782") {
       id,
-      name,
-      owner {
-        id
+      title,
+      content,
+      blog {
+        id,
+        name,
+        owner {
+          id,
+          email
+        }
+      }
+      author {
+        id,
+        email
       }
     }
   }
+}
 ```
 
 That is all for this guide!
