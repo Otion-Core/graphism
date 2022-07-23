@@ -607,10 +607,21 @@ defmodule Graphism.Resolver do
               end
 
             rel[:opts][:from] != nil ->
-              from = rel[:opts][:from]
+              [parent_rel, rel_name] =
+                case rel[:opts][:from] do
+                  [parent_rel, rel_name] -> [parent_rel, rel_name]
+                  parent_rel -> [parent_rel, rel[:name]]
+                end
+
+              relation = Entity.relation!(e, parent_rel)
+              target_entity = relation[:target]
+
+              target = Entity.find_entity!(schema, target_entity)
+              api_module = target[:api_module]
 
               quote do
-                unquote(Ast.var(rel)) <- unquote(api_module).relation(unquote(Ast.var(from)), unquote(rel[:name]))
+                unquote(Ast.var(rel)) <-
+                  unquote(api_module).relation(unquote(Ast.var(parent_rel)), unquote(rel_name))
               end
 
             rel[:opts][:from_context] != nil ->

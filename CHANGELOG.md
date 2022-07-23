@@ -2,7 +2,8 @@
 
 ## Unreleased
 
-* Ast improvements [#117](https://github.com/Gravity-Core/graphism/pull/117)
+* Better support for aliases in computed relations - [#118](https://github.com/Gravity-Core/graphism/pull/118)
+* Ast improvements - [#117](https://github.com/Gravity-Core/graphism/pull/117)
 
 ## 0.7.2 (July 20th, 2022)
 
