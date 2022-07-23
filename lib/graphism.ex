@@ -38,6 +38,7 @@ defmodule Graphism do
     )
 
     repo = opts[:repo]
+    styles = opts[:styles] || [:graphql]
 
     if repo != nil do
       Module.register_attribute(__CALLER__.module, :repo,
@@ -46,6 +47,7 @@ defmodule Graphism do
       )
 
       Module.put_attribute(__CALLER__.module, :repo, repo)
+      Module.put_attribute(__CALLER__.module, :styles, styles)
 
       alias Dataloader, as: DL
 
@@ -55,46 +57,51 @@ defmodule Graphism do
         end)
 
       quote do
-        defmodule Dataloader.Repo do
-          @queryables unquote(__CALLER__.module).DataloaderQueries
-
-          def data do
-            DL.Ecto.new(unquote(repo), query: &query/2)
-          end
-
-          def query(queryable, params) do
-            @queryables.query(queryable, params)
-          end
-        end
-
         import unquote(__MODULE__), only: :macros
         @before_compile unquote(__MODULE__)
 
-        use Absinthe.Schema
-        import Absinthe.Resolution.Helpers, only: [dataloader: 1]
-        import_types(Absinthe.Type.Custom)
-        import_types(Absinthe.Plug.Types)
-        import_types(Graphism.Type.Graphql.Json)
+        unquote do
+          if Enum.member?(styles, :graphql) do
+            quote do
+              defmodule Dataloader.Repo do
+                @queryables unquote(__CALLER__.module).DataloaderQueries
 
-        @sources [unquote(__CALLER__.module).Dataloader.Repo]
-        @fields_auth unquote(__CALLER__.module).FieldsAuth
-        @middleware unquote(middleware)
+                def data do
+                  DL.Ecto.new(unquote(repo), query: &query/2)
+                end
 
-        def context(ctx) do
-          loader =
-            Enum.reduce(@sources, DL.new(), fn source, loader ->
-              DL.add_source(loader, source, source.data())
-            end)
+                def query(queryable, params) do
+                  @queryables.query(queryable, params)
+                end
+              end
 
-          Map.put(ctx, :loader, loader)
-        end
+              use Absinthe.Schema
+              import Absinthe.Resolution.Helpers, only: [dataloader: 1]
+              import_types(Absinthe.Type.Custom)
+              import_types(Absinthe.Plug.Types)
+              import_types(Graphism.Type.Graphql.Json)
+              @sources [unquote(__CALLER__.module).Dataloader.Repo]
+              @fields_auth unquote(__CALLER__.module).FieldsAuth
+              @middleware unquote(middleware)
 
-        def plugins do
-          [Absinthe.Middleware.Dataloader] ++ Absinthe.Plugin.defaults()
-        end
+              def context(ctx) do
+                loader =
+                  Enum.reduce(@sources, DL.new(), fn source, loader ->
+                    DL.add_source(loader, source, source.data())
+                  end)
 
-        def middleware(middleware, _field, _object) do
-          @middleware ++ middleware ++ [@fields_auth, Graphism.ErrorMiddleware]
+                Map.put(ctx, :loader, loader)
+              end
+
+              def plugins do
+                [Absinthe.Middleware.Dataloader] ++ Absinthe.Plugin.defaults()
+              end
+
+              def middleware(middleware, _field, _object) do
+                @middleware ++ middleware ++ [@fields_auth, Graphism.ErrorMiddleware]
+              end
+            end
+          end
         end
       end
     else
@@ -111,6 +118,10 @@ defmodule Graphism do
     repo =
       caller_module
       |> Module.get_attribute(:repo)
+
+    styles =
+      caller_module
+      |> Module.get_attribute(:styles)
 
     unless repo do
       []
@@ -174,8 +185,6 @@ defmodule Graphism do
         data
         |> Enum.filter(fn {_, values} -> is_list(values) end)
 
-      default_allow_hook = Entity.hook(hooks, :allow, :default)
-
       unless length(schema) > 0 do
         raise """
           Your Graphism schema is empty. Please define at least
@@ -187,6 +196,16 @@ defmodule Graphism do
           end
         """
       end
+
+      schema = Enum.reverse(schema)
+
+      schema
+      |> Enum.each(fn e ->
+        if Enum.empty?(e[:attributes]) and
+             Enum.empty?(e[:relations]) do
+          raise "Entity #{e[:name]} is empty"
+        end
+      end)
 
       enums_fun =
         quote do
@@ -202,16 +221,6 @@ defmodule Graphism do
           end
         end
 
-      schema = Enum.reverse(schema)
-
-      schema
-      |> Enum.each(fn e ->
-        if Enum.empty?(e[:attributes]) and
-             Enum.empty?(e[:relations]) do
-          raise "Entity #{e[:name]} is empty"
-        end
-      end)
-
       schema_empty_modules = Graphism.Schema.empty_modules(schema)
 
       schema_modules =
@@ -226,46 +235,79 @@ defmodule Graphism do
           Graphism.Api.api_module(e, schema, hooks, repo: repo, caller: __CALLER__)
         end)
 
-      resolver_modules =
-        Enum.map(schema, fn e ->
-          Graphism.Resolver.resolver_module(e, schema,
-            repo: repo,
-            hooks: hooks,
-            caller: __CALLER__
-          )
-        end)
+      rest_modules =
+        if Enum.member?(styles, :rest) do
+          openapi_module = Graphism.Openapi.spec_module(schema, caller: __CALLER__)
+          redocui_module = Graphism.Openapi.redocui_module(schema, caller: __CALLER__)
+          rest_router_module = Graphism.Rest.router_module(schema, caller: __CALLER__)
+          rest_handler_modules = Graphism.Rest.handler_modules(schema, hooks, repo: repo, caller: __CALLER__)
+          rest_helper_modules = Graphism.Rest.helper_modules(schema, hooks, repo: repo, caller: __CALLER__)
+          json_encoder_modules = Graphism.Encoder.json_modules(schema)
 
-      graphql_dataloader_queries = Graphism.Graphql.dataloader_queries(schema)
-      graphql_fields_auth = Graphism.Graphql.fields_auth_module(schema, default_allow_hook)
-      graphql_enums = Graphism.Graphql.enums(enums)
-      graphql_objects = Graphism.Graphql.objects(schema, caller: __CALLER__.module)
-      graphql_self_resolver = Graphism.Graphql.self_resolver()
-      graphql_aggregate_type = Graphism.Graphql.aggregate_type()
-      graphql_entities_queries = Graphism.Graphql.entities_queries(schema)
-      graphql_entities_mutations = Graphism.Graphql.entities_mutations(schema)
-      graphql_input_types = Graphism.Graphql.input_types(schema)
-      graphql_queries = Graphism.Graphql.queries(schema)
-      graphql_mutations = Graphism.Graphql.mutations(schema)
+          [
+            openapi_module,
+            redocui_module,
+            rest_helper_modules,
+            rest_handler_modules,
+            rest_router_module,
+            json_encoder_modules
+          ]
+        else
+          []
+        end
 
-      List.flatten([
-        enums_fun,
-        schema_fun,
-        schema_empty_modules,
-        schema_modules,
-        api_modules,
-        resolver_modules,
-        graphql_dataloader_queries,
-        graphql_fields_auth,
-        graphql_enums,
-        graphql_input_types,
-        graphql_objects,
-        graphql_self_resolver,
-        graphql_aggregate_type,
-        graphql_entities_queries,
-        graphql_entities_mutations,
-        graphql_queries,
-        graphql_mutations
-      ])
+      graphql_modules =
+        if Enum.member?(styles, :graphql) do
+          default_allow_hook = Entity.hook(hooks, :allow, :default)
+
+          graphql_resolver_modules =
+            Enum.map(schema, fn e ->
+              Graphism.Resolver.resolver_module(e, schema,
+                repo: repo,
+                hooks: hooks,
+                caller: __CALLER__
+              )
+            end)
+
+          graphql_dataloader_queries = Graphism.Graphql.dataloader_queries(schema)
+          graphql_fields_auth = Graphism.Graphql.fields_auth_module(schema, default_allow_hook)
+          graphql_enums = Graphism.Graphql.enums(enums)
+          graphql_objects = Graphism.Graphql.objects(schema, caller: __CALLER__.module)
+          graphql_self_resolver = Graphism.Graphql.self_resolver()
+          graphql_aggregate_type = Graphism.Graphql.aggregate_type()
+          graphql_entities_queries = Graphism.Graphql.entities_queries(schema)
+          graphql_entities_mutations = Graphism.Graphql.entities_mutations(schema)
+          graphql_input_types = Graphism.Graphql.input_types(schema)
+          graphql_queries = Graphism.Graphql.queries(schema)
+          graphql_mutations = Graphism.Graphql.mutations(schema)
+
+          [
+            graphql_resolver_modules,
+            graphql_dataloader_queries,
+            graphql_fields_auth,
+            graphql_enums,
+            graphql_objects,
+            graphql_self_resolver,
+            graphql_aggregate_type,
+            graphql_entities_queries,
+            graphql_entities_mutations,
+            graphql_input_types,
+            graphql_queries,
+            graphql_mutations
+          ]
+        else
+          []
+        end
+
+      List.flatten(
+        [
+          enums_fun,
+          schema_fun,
+          schema_empty_modules,
+          schema_modules,
+          api_modules
+        ] ++ graphql_modules ++ rest_modules
+      )
     end
   end
 
@@ -315,6 +357,8 @@ defmodule Graphism do
       |> Entity.with_schema_module(caller_module)
       |> Entity.with_api_module(caller_module)
       |> Entity.with_resolver_module(caller_module)
+      |> Entity.with_handler_module(caller_module)
+      |> Entity.with_json_encoder_module(caller_module)
       |> Entity.maybe_with_scope()
 
     Module.put_attribute(__CALLER__.module, :schema, entity)

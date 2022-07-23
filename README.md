@@ -603,3 +603,38 @@ Graphism emits telemetry events for various operations and publishes their durat
 | `[:graphism, :relation, :stop]` | `:duration` | `:entity`, `:relation` |
 
 You can also subscribe to the `[:start]` and `[:exception]` events, since Graphism relies on `:telemetry.span/3`.
+
+### REST
+
+Since v0.8.0, Graphism now also generates a REST api for your schema. 
+
+To enable this, select the `:rest` style:
+
+```elixir
+defmodule MySchema do
+  use Graphism, repo: MyRepo, styles: [:rest] 
+end
+```
+
+Graphism will then generate a router module for your schema, an OpenApi 3.0 spec and a RedocUI static html so that you
+can easily discover your api.
+
+Sample configuration using Plug:
+
+```elixir
+defmodule MyRouter do
+  use Plug.Router
+  
+  plug(Plug.Parsers,
+      parsers: [:urlencoded, :multipart, :json],
+      pass: ["*/*"],
+      json_decoder: Jason
+  )
+  plug :match
+  plug :dispatch
+  ...
+  forward("/api", to: MySchema.Router)
+  get("/redoc", to: MySchema.RedocUI, init_opts: [spec_url: "/api/openapi.json"])>
+  ...
+end
+```

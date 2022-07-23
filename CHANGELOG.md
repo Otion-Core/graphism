@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+* REST Api - [#119](https://github.com/Gravity-Core/graphism/pull/119)
+
 ## 0.7.3 (July 23rd, 2022)
 
 * Introduce mix graphism.new - [#118](https://github.com/Gravity-Core/graphism/pull/118)
