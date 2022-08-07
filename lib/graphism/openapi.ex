@@ -532,7 +532,7 @@ defmodule Graphism.Openapi do
         Map.put(paths, :get, %{
           summary: "Read a single #{e[:camel_name]}",
           operationId: "read#{e[:display_name]}",
-          tags: [e[:plural_camel_name]],
+          tags: [e[:camel_name]],
           parameters: with_id_parameter([], e),
           responses: responses(e)
         })
@@ -548,7 +548,7 @@ defmodule Graphism.Openapi do
         Map.put(paths, :put, %{
           summary: "Update an existing #{e[:camel_name]}",
           operationId: "update#{e[:display_name]}",
-          tags: [e[:plural_camel_name]],
+          tags: [e[:camel_name]],
           parameters: with_id_parameter([], e),
           requestBody: %{
             description: "Info required to update an existing #{e[:camel_name]}",
@@ -577,7 +577,7 @@ defmodule Graphism.Openapi do
         Map.put(paths, :delete, %{
           summary: "Delete an existing #{e[:camel_name]}",
           operationId: "delete#{e[:display_name]}",
-          tags: [e[:plural_camel_name]],
+          tags: [e[:camel_name]],
           parameters: with_id_parameter([], e),
           responses: responses()
         })
@@ -609,7 +609,7 @@ defmodule Graphism.Openapi do
         Map.put(paths, :post, %{
           summary: "Create a new #{e[:camel_name]}",
           operationId: "create#{e[:display_name]}",
-          tags: [e[:plural_camel_name]],
+          tags: [e[:camel_name]],
           parameters: [],
           requestBody: %{
             description: "Info required to create a new #{e[:camel_name]}",

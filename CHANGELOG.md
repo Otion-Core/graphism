@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+* Openapi improvements - [#123](https://github.com/Gravity-Core/graphism/pull/123)
+
 ## 0.8.0 (August 7th, 2022)
 
 * REST Api - [#119](https://github.com/Gravity-Core/graphism/pull/119)
