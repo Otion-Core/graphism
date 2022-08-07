@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.8.0 (August 7th, 2022)
+
 * REST Api - [#119](https://github.com/Gravity-Core/graphism/pull/119)
 
 ## 0.7.3 (July 23rd, 2022)
