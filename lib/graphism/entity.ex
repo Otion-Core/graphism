@@ -50,17 +50,26 @@ defmodule Graphism.Entity do
     end) != nil
   end
 
+  def find_action(e, action) do
+    e[:actions][action] || e[:custom_actions][action]
+  end
+
   def virtual?(e), do: modifier?(e, :virtual)
   def client_ids?(e), do: modifier?(e, :client_ids)
   def refetch?(e), do: modifier?(e, :refetch)
   def internal?(e), do: modifier?(e, :internal)
 
-  def computed?(attr), do: modifier?(attr, :computed)
+  def id?(attr), do: attr[:name] == :id
+  def computed?(field), do: modifier?(field, :computed)
+  def ancestor?(rel), do: rel[:opts][:from] != nil
   def optional?(attr), do: modifier?(attr, :optional)
+  def required?(attr), do: !optional?(attr) && !computed?(attr)
   def unique?(attr), do: modifier?(attr, :unique)
   def immutable?(attr), do: modifier?(attr, :immutable)
   def non_empty?(attr), do: modifier?(attr, :non_empty)
   def private?(attr), do: modifier?(attr, :private)
+  def public?(field), do: !private?(field) && !internal?(field)
+  def preloaded?(rel), do: rel[:opts][:preloaded]
 
   def boolean?(attr), do: attr[:kind] == :boolean
   def enum?(attr), do: attr[:opts][:one_of] != nil
@@ -140,6 +149,13 @@ defmodule Graphism.Entity do
     Enum.member?(rel[:opts][:inline] || [], action)
   end
 
+  def computed_relation_path(rel) do
+    case rel[:opts][:from] do
+      [parent_rel, rel_name] -> [parent_rel, rel_name]
+      parent_rel -> [parent_rel, rel[:name]]
+    end
+  end
+
   def find_relation_by_kind_and_target!(e, kind, target) do
     rel =
       e[:relations]
@@ -169,7 +185,7 @@ defmodule Graphism.Entity do
       nil ->
         case relation(e, name) do
           nil ->
-            raise "No entity or relation #{name} in entity #{e[:name]}"
+            raise "No attribute or relation #{name} in entity #{e[:name]}"
 
           rel ->
             {:relation, rel}
@@ -179,6 +195,9 @@ defmodule Graphism.Entity do
         {:attribute, attr}
     end
   end
+
+  def attribute(_e, :inserted_at), do: attribute([:inserted_at, :datetime])
+  def attribute(_e, :updated_at), do: attribute([:updated_at, :datetime])
 
   def attribute(e, name) do
     Enum.find(e[:attributes], fn attr ->
@@ -192,10 +211,35 @@ defmodule Graphism.Entity do
     end)
   end
 
+  def all_fields(e), do: e[:attributes] ++ e[:relations]
+
+  def required_attributes(e), do: Enum.filter(e[:attributes], &required?/1)
+  def required_fields(e), do: Enum.filter(e[:attributes] ++ e[:relations], &required?/1)
+  def public_attributes(e), do: Enum.filter(e[:attributes], &public?/1)
+  def public_relations(e), do: Enum.filter(e[:relations], &public?/1)
+
   def unique_keys(e), do: Enum.filter(e[:keys], &unique_key?/1)
   def non_unique_keys(e), do: Enum.reject(e[:keys], &unique_key?/1)
+  def unique_attributes(e), do: Enum.filter(e[:attributes], &unique?/1)
+
+  def unique_keys_and_attributes(e) do
+    unique_keys(e) ++
+      (e |> unique_attributes() |> Enum.map(&attribute_as_unique_key/1))
+  end
+
+  defp attribute_as_unique_key(attr) do
+    [name: attr[:name], fields: [attr[:name]], unique: true]
+  end
 
   defp unique_key?(k), do: k[:unique]
+
+  def list_by_parent_fun_name(rel) do
+    String.to_atom("list_by_#{rel[:name]}")
+  end
+
+  def aggregate_by_parent_fun_name(rel) do
+    String.to_atom("aggregate_by_#{rel[:name]}")
+  end
 
   def get_by_key_fun_name(key) do
     fields = Enum.join(key[:fields], "_and_")
@@ -279,6 +323,16 @@ defmodule Graphism.Entity do
     with hook when hook != nil <- Enum.find(hooks, &(&1.kind == kind and &1.name == name)) do
       hook.module
     end
+  end
+
+  def hook!(hooks, kind, name) do
+    hook = hook(hooks, kind, name)
+
+    unless hook do
+      "No hook defined of type #{kind} and name #{name}"
+    end
+
+    hook
   end
 
   defp hook_call(e, mod, :before, :update) do
@@ -401,8 +455,15 @@ defmodule Graphism.Entity do
     |> Enum.map(fn e ->
       e
       |> with_display_name()
+      |> with_camel_name()
       |> with_relations!(index, plurals)
     end)
+  end
+
+  def with_camel_name(e) do
+    e
+    |> Keyword.put(:camel_name, Inflex.camelize(e[:name], :lower))
+    |> Keyword.put(:plural_camel_name, Inflex.camelize(e[:plural], :lower))
   end
 
   def with_display_name(e) do
@@ -548,6 +609,14 @@ defmodule Graphism.Entity do
 
   def with_api_module(entity, caller_mod) do
     module_name(caller_mod, entity, :api_module, :api)
+  end
+
+  def with_handler_module(entity, caller_mod) do
+    module_name(caller_mod, entity, :handler_module, :handler)
+  end
+
+  def with_json_encoder_module(entity, caller_mod) do
+    module_name(caller_mod, entity, :json_encoder_module, :json_encoder)
   end
 
   def module_name(prefix, entity, name, suffix \\ nil) do
@@ -761,23 +830,17 @@ defmodule Graphism.Entity do
   def relation_from(_), do: nil
 
   def maybe_computed(field) do
-    from_opt = get_in(field, [:opts, :from]) || get_in(field, [:opts, :from_context])
+    computed? =
+      get_in(field, [:opts, :from]) ||
+        get_in(field, [:opts, :from_context]) ||
+        get_in(field, [:opts, :using])
 
-    case from_opt do
-      nil ->
-        field
+    if computed?, do: with_modifier(field, :computed), else: field
+  end
 
-      _ ->
-        modifiers = get_in(field, [:opts, :modifiers]) || []
-
-        case Enum.member?(modifiers, :computed) do
-          true ->
-            field
-
-          false ->
-            put_in(field, [:opts, :modifiers], [:computed | modifiers])
-        end
-    end
+  defp with_modifier(field, mod) do
+    mods = get_in(field, [:opts, :modifiers]) || []
+    put_in(field, [:opts, :modifiers], Enum.uniq([mod | mods]))
   end
 
   def maybe_preloaded(rel) do
