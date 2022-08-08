@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.8.1 (August 8th, 2022)
+
 * Openapi improvements - [#123](https://github.com/Gravity-Core/graphism/pull/123)
 
 ## 0.8.0 (August 7th, 2022)
