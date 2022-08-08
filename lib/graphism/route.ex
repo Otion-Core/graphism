@@ -26,7 +26,7 @@ defmodule Graphism.Route do
 
   def for_key(e, key) do
     key[:fields]
-    |> Enum.reduce(for_aggregation(e), fn field, path ->
+    |> Enum.reduce(for_collection(e), fn field, path ->
       path
       |> suffixed_with(field)
       |> with_param(field)
