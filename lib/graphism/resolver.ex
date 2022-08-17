@@ -27,7 +27,6 @@ defmodule Graphism.Resolver do
         (unquote_splicing(resolver_funs))
       end
     end
-    |> Ast.print()
   end
 
   defp with_resolver_pagination_fun(funs) do
