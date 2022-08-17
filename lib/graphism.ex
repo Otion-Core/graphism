@@ -258,7 +258,7 @@ defmodule Graphism do
 
       graphql_modules =
         if Enum.member?(styles, :graphql) do
-          default_allow_hook = Entity.hook(hooks, :allow, :default)
+          auth_hook = Graphism.Hooks.auth_module(hooks)
 
           graphql_resolver_modules =
             Enum.map(schema, fn e ->
@@ -270,7 +270,7 @@ defmodule Graphism do
             end)
 
           graphql_dataloader_queries = Graphism.Graphql.dataloader_queries(schema)
-          graphql_fields_auth = Graphism.Graphql.fields_auth_module(schema, default_allow_hook)
+          graphql_fields_auth = Graphism.Graphql.fields_auth_module(schema, auth_hook)
           graphql_enums = Graphism.Graphql.enums(enums)
           graphql_objects = Graphism.Graphql.objects(schema, caller: __CALLER__.module)
           graphql_self_resolver = Graphism.Graphql.self_resolver()

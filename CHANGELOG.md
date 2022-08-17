@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+* Optional auth - [#125](https://github.com/Gravity-Core/graphism/pull/125)
+
 ## 0.8.1 (August 8th, 2022)
 
 * Openapi improvements - [#123](https://github.com/Gravity-Core/graphism/pull/123)
