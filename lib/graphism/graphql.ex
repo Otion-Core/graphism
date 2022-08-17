@@ -132,31 +132,39 @@ defmodule Graphism.Graphql do
       mod = attr[:opts][:allow] || allow_hook
       schema_module = e[:schema_module]
 
-      quote do
-        defp auth(unquote(entity_name), unquote(field_name), resolution) do
-          graphism = %{
-            entity: unquote(entity_name),
-            field: unquote(field_name),
-            schema: unquote(schema_module)
-          }
+      if mod != nil do
+        quote do
+          defp auth(unquote(entity_name), unquote(field_name), resolution) do
+            graphism = %{
+              entity: unquote(entity_name),
+              field: unquote(field_name),
+              schema: unquote(schema_module)
+            }
 
-          context =
-            resolution.context
-            |> Map.drop([:pubsub, :loader, :__absinthe_plug__])
-            |> Map.put(:graphism, graphism)
-            |> Map.put(unquote(entity_name), resolution.source)
+            context =
+              resolution.context
+              |> Map.drop([:pubsub, :loader, :__absinthe_plug__])
+              |> Map.put(:graphism, graphism)
+              |> Map.put(unquote(entity_name), resolution.source)
 
-          meta = %{entity: unquote(entity_name), kind: :attribute, value: unquote(field_name)}
+            meta = %{entity: unquote(entity_name), kind: :attribute, value: unquote(field_name)}
 
-          :telemetry.span([:graphism, :allow], meta, fn ->
-            {case unquote(mod).allow?(resolution.value, context) do
-               true ->
-                 resolution
+            :telemetry.span([:graphism, :allow], meta, fn ->
+              {case unquote(mod).allow?(resolution.value, context) do
+                 true ->
+                   resolution
 
-               false ->
-                 Absinthe.Resolution.put_result(resolution, {:error, :unauthorized})
-             end, meta}
-          end)
+                 false ->
+                   Absinthe.Resolution.put_result(resolution, {:error, :unauthorized})
+               end, meta}
+            end)
+          end
+        end
+      else
+        quote do
+          defp auth(unquote(entity_name), unquote(field_name), resolution) do
+            resolution
+          end
         end
       end
     end)
@@ -173,36 +181,44 @@ defmodule Graphism.Graphql do
       schema_module = e[:schema_module]
       target_schema_module = Entity.find_entity!(schema, target_entity)[:schema_module]
 
-      quote do
-        defp auth(unquote(entity_name), unquote(field_name), resolution) do
-          graphism = %{
-            entity: unquote(entity_name),
-            field: unquote(field_name),
-            target_entity: unquote(target_entity),
-            schema: unquote(schema_module),
-            target_schema: unquote(target_schema_module)
-          }
+      if mod != nil do
+        quote do
+          defp auth(unquote(entity_name), unquote(field_name), resolution) do
+            graphism = %{
+              entity: unquote(entity_name),
+              field: unquote(field_name),
+              target_entity: unquote(target_entity),
+              schema: unquote(schema_module),
+              target_schema: unquote(target_schema_module)
+            }
 
-          field_value = Map.get(resolution.source, unquote(field_name))
+            field_value = Map.get(resolution.source, unquote(field_name))
 
-          context =
-            resolution.context
-            |> Map.drop([:pubsub, :loader, :__absinthe_plug__])
-            |> Map.put(:graphism, graphism)
-            |> Map.put(unquote(field_name), field_value)
-            |> Map.put(unquote(entity_name), resolution.source)
+            context =
+              resolution.context
+              |> Map.drop([:pubsub, :loader, :__absinthe_plug__])
+              |> Map.put(:graphism, graphism)
+              |> Map.put(unquote(field_name), field_value)
+              |> Map.put(unquote(entity_name), resolution.source)
 
-          meta = %{entity: unquote(entity_name), kind: :relation, value: unquote(field_name)}
+            meta = %{entity: unquote(entity_name), kind: :relation, value: unquote(field_name)}
 
-          :telemetry.span([:graphism, :allow], meta, fn ->
-            {case unquote(mod).allow?(resolution.value, context) do
-               true ->
-                 resolution
+            :telemetry.span([:graphism, :allow], meta, fn ->
+              {case unquote(mod).allow?(resolution.value, context) do
+                 true ->
+                   resolution
 
-               false ->
-                 Absinthe.Resolution.put_result(resolution, {:error, :unauthorized})
-             end, meta}
-          end)
+                 false ->
+                   Absinthe.Resolution.put_result(resolution, {:error, :unauthorized})
+               end, meta}
+            end)
+          end
+        end
+      else
+        quote do
+          defp auth(unquote(entity_name), unquote(field_name), resolution) do
+            resolution
+          end
         end
       end
     end)
@@ -218,31 +234,39 @@ defmodule Graphism.Graphql do
       mod = rel[:opts][:allow] || allow_hook
       target_schema_module = Entity.find_entity!(schema, target_entity)[:schema_module]
 
-      quote do
-        defp auth(unquote(entity_name), unquote(field_name), resolution) do
-          graphism = %{
-            action: :read,
-            entity: unquote(target_entity),
-            schema: unquote(target_schema_module)
-          }
+      if mod != nil do
+        quote do
+          defp auth(unquote(entity_name), unquote(field_name), resolution) do
+            graphism = %{
+              action: :read,
+              entity: unquote(target_entity),
+              schema: unquote(target_schema_module)
+            }
 
-          context =
-            resolution.context
-            |> Map.drop([:pubsub, :loader, :__absinthe_plug__])
-            |> Map.put(:graphism, graphism)
+            context =
+              resolution.context
+              |> Map.drop([:pubsub, :loader, :__absinthe_plug__])
+              |> Map.put(:graphism, graphism)
 
-          meta = %{entity: unquote(entity_name), kind: :relation, value: unquote(field_name)}
+            meta = %{entity: unquote(entity_name), kind: :relation, value: unquote(field_name)}
 
-          value =
-            Enum.filter(resolution.value, fn value ->
-              context = Map.put(context, unquote(target_entity), value)
+            value =
+              Enum.filter(resolution.value, fn value ->
+                context = Map.put(context, unquote(target_entity), value)
 
-              :telemetry.span([:graphism, :allow], meta, fn ->
-                {unquote(mod).allow?(value, context), meta}
+                :telemetry.span([:graphism, :allow], meta, fn ->
+                  {unquote(mod).allow?(value, context), meta}
+                end)
               end)
-            end)
 
-          %{resolution | value: value}
+            %{resolution | value: value}
+          end
+        end
+      else
+        quote do
+          defp auth(unquote(entity_name), unquote(field_name), resolution) do
+            resolution
+          end
         end
       end
     end)

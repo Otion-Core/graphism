@@ -1,7 +1,7 @@
 defmodule Graphism.Entity do
   @moduledoc "Entity helpers"
 
-  alias Graphism.Ast
+  alias Graphism.{Ast, Hooks}
 
   def action_for(e, action) do
     (e[:actions] ++ e[:custom_actions])
@@ -299,34 +299,8 @@ defmodule Graphism.Entity do
     |> Enum.filter(fn rel -> rel[:kind] == :belongs_to end)
   end
 
-  def allow_hook!(e, opts, action, hooks) do
-    mod = opts[:allow] || hook(hooks, :allow, :default)
-
-    unless mod do
-      raise "missing :allow option in entity #{e[:name]} for action :#{action}, and no default authorization hook has been defined in the schema"
-    end
-
-    mod
-  end
-
-  def scope_hook!(e, opts, action, hooks) do
-    mod = opts[:scope] || hook(hooks, :allow, :default)
-
-    unless mod do
-      raise "missing :scope option in entity #{e[:name]} for action :#{action}, and no default authorization hook has been defined in the schema"
-    end
-
-    mod
-  end
-
-  def hook(hooks, kind, name) do
-    with hook when hook != nil <- Enum.find(hooks, &(&1.kind == kind and &1.name == name)) do
-      hook.module
-    end
-  end
-
   def hook!(hooks, kind, name) do
-    hook = hook(hooks, kind, name)
+    hook = Hooks.find(hooks, kind, name)
 
     unless hook do
       "No hook defined of type #{kind} and name #{name}"

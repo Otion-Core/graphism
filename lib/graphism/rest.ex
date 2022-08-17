@@ -1,10 +1,10 @@
 defmodule Graphism.Rest do
   @moduledoc "Generates a REST api"
 
-  alias Graphism.{Ast, Entity, Openapi, Route}
+  alias Graphism.{Ast, Entity, Hooks, Openapi, Route}
 
   def helper_modules(_schema, hooks, _opts) do
-    auth = Entity.hook(hooks, :allow, :default)
+    auth = Hooks.auth_module(hooks)
 
     quote do
       defmodule RouterHelper do
@@ -100,12 +100,23 @@ defmodule Graphism.Rest do
           Map.put(assigns, assigns.graphism.entity, item)
         end
 
-        def allowed?(assigns, args \\ nil) do
-          case unquote(auth).allow?(args, assigns) do
-            true -> :ok
-            false -> {:error, :unauthorized}
+        unquote(
+          if auth != nil do
+            quote do
+              def allowed?(assigns, args \\ nil) do
+                if unquote(auth).allow?(args, assigns) do
+                  :ok
+                else
+                  {:error, :unauthorized}
+                end
+              end
+            end
+          else
+            quote do
+              def allowed?(_assigns, _args \\ nil), do: :ok
+            end
           end
-        end
+        )
 
         defp cast(nil, _, :invalid), do: {:error, :invalid}
         defp cast(nil, _, :continue), do: {:error, :continue}

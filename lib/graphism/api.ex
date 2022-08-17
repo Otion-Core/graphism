@@ -1,7 +1,7 @@
 defmodule Graphism.Api do
   @moduledoc "Generaes entity api modules"
 
-  alias Graphism.{Ast, Entity}
+  alias Graphism.{Ast, Entity, Hooks}
 
   def api_module(e, schema, hooks, opts) do
     schema_module = e[:schema_module]
@@ -59,29 +59,35 @@ defmodule Graphism.Api do
   end
 
   defp with_api_convenience_functions(funs, e, _schema, repo_module) do
-    [
-      quote do
-        def relation(parent, child) do
-          case Map.get(parent, child) do
-            %{id: _} = rel ->
-              rel
+    fun =
+      if e |> Entity.relations() |> Enum.empty?() do
+        quote do
+          def relation(_parent, child), do: nil
+        end
+      else
+        quote do
+          def relation(parent, child) do
+            case Map.get(parent, child) do
+              %{id: _} = rel ->
+                rel
 
-            nil ->
-              nil
+              nil ->
+                nil
 
-            _ ->
-              meta = %{entity: unquote(e[:name]), relation: child}
+              _ ->
+                meta = %{entity: unquote(e[:name]), relation: child}
 
-              :telemetry.span([:graphism, :relation], meta, fn ->
-                {parent
-                 |> unquote(repo_module).preload(child)
-                 |> Map.get(child), meta}
-              end)
+                :telemetry.span([:graphism, :relation], meta, fn ->
+                  {parent
+                   |> unquote(repo_module).preload(child)
+                   |> Map.get(child), meta}
+                end)
+            end
           end
         end
       end
-      | funs
-    ]
+
+    [fun | funs]
   end
 
   defp with_query_preload_fun(funs, e, _schema) do
@@ -148,11 +154,24 @@ defmodule Graphism.Api do
         end
 
         defp sort_column(field) do
-          case unquote(schema_module).field_spec(field) do
-            {:ok, _, sort_column} -> {:ok, sort_column}
-            {:ok, :belongs_to, _, _, sort_column} -> {:ok, sort_column}
-            _ -> {:error, :invalid_sort_by}
-          end
+          unquote(
+            if e |> Entity.relations() |> Enum.empty?() do
+              quote do
+                case unquote(schema_module).field_spec(field) do
+                  {:ok, _, sort_column} -> {:ok, sort_column}
+                  _ -> {:error, :invalid_sort_by}
+                end
+              end
+            else
+              quote do
+                case unquote(schema_module).field_spec(field) do
+                  {:ok, _, sort_column} -> {:ok, sort_column}
+                  {:ok, :belongs_to, _, _, sort_column} -> {:ok, sort_column}
+                  _ -> {:error, :invalid_sort_by}
+                end
+              end
+            end
+          )
         end
 
         defp maybe_limit(query, context) do
@@ -173,6 +192,18 @@ defmodule Graphism.Api do
     ]
   end
 
+  defp scoped_query_invocation(nil, _) do
+    quote do
+      query <- query
+    end
+  end
+
+  defp scoped_query_invocation(mod, action) do
+    quote do
+      query <- scoped_query(query, unquote(mod), context, unquote(action))
+    end
+  end
+
   defp with_query_scope_fun(funs, e) do
     [
       quote do
@@ -189,8 +220,7 @@ defmodule Graphism.Api do
   end
 
   defp with_api_list_funs(funs, e, schema_module, repo_module, hooks) do
-    action_opts = Entity.action_for(e, :list)
-    scope_mod = Entity.scope_hook!(e, action_opts, :list, hooks)
+    scope_mod = Hooks.auth_module(hooks)
 
     List.flatten([
       api_list_all_funs(e, schema_module, repo_module, scope_mod),
@@ -229,7 +259,7 @@ defmodule Graphism.Api do
       defp unquote(internal_fun_name)(context) do
         query = from(unquote(Ast.var(e)) in unquote(schema_module))
 
-        with query <- scoped_query(query, unquote(scope_mod), context, unquote(fun_name)),
+        with unquote(scoped_query_invocation(scope_mod, fun_name)),
              {:ok, query} <- maybe_paginate(query, context),
              {:ok, query} <- maybe_with_preloads(query) do
           {:ok, unquote(repo_module).all(query)}
@@ -274,7 +304,7 @@ defmodule Graphism.Api do
           from(unquote(Ast.var(rel)) in unquote(schema_module))
           |> where([q], q.unquote(String.to_atom("#{rel[:name]}_id")) == ^id)
 
-        with query <- scoped_query(query, unquote(scope_mod), context, unquote(fun_name)),
+        with unquote(scoped_query_invocation(scope_mod, fun_name)),
              {:ok, query} <- maybe_paginate(query, context),
              {:ok, query} <- maybe_with_preloads(query) do
           {:ok, unquote(repo_module).all(query)}
@@ -329,7 +359,7 @@ defmodule Graphism.Api do
         query = from(unquote(Ast.var(e)) in unquote(schema_module))
         unquote_splicing(filters)
 
-        with query <- scoped_query(query, unquote(scope_mod), context, unquote(fun_name)),
+        with unquote(scoped_query_invocation(scope_mod, fun_name)),
              {:ok, query} <- maybe_paginate(query, context),
              {:ok, query} <- maybe_with_preloads(query) do
           {:ok, unquote(repo_module).all(query)}
@@ -339,8 +369,7 @@ defmodule Graphism.Api do
   end
 
   defp with_api_aggregate_funs(funs, e, schema_module, repo_module, hooks) do
-    action_opts = Entity.action_for(e, :list)
-    scope_mod = Entity.scope_hook!(e, action_opts, :list, hooks)
+    scope_mod = Hooks.auth_module(hooks)
 
     List.flatten([
       api_aggregate_all_funs(e, schema_module, repo_module, scope_mod),
@@ -379,7 +408,7 @@ defmodule Graphism.Api do
       defp unquote(internal_fun_name)(context \\ %{}) do
         query = from(unquote(Ast.var(e)) in unquote(schema_module))
 
-        with query <- scoped_query(query, unquote(scope_mod), context, unquote(fun_name)) do
+        with unquote(scoped_query_invocation(scope_mod, fun_name)) do
           {:ok, %{count: unquote(repo_module).aggregate(query, :count)}}
         end
       end
@@ -423,7 +452,7 @@ defmodule Graphism.Api do
           from(unquote(Ast.var(rel)) in unquote(schema_module))
           |> where([q], q.unquote(column_name) == ^id)
 
-        with query <- scoped_query(query, unquote(scope_mod), context, unquote(fun_name)) do
+        with unquote(scoped_query_invocation(scope_mod, fun_name)) do
           {:ok, %{count: unquote(repo_module).aggregate(query, :count)}}
         end
       end
@@ -476,7 +505,7 @@ defmodule Graphism.Api do
         query = from(unquote(Ast.var(e)) in unquote(schema_module))
         unquote_splicing(filters)
 
-        with query <- scoped_query(query, unquote(scope_mod), context, unquote(fun_name)) do
+        with unquote(scoped_query_invocation(scope_mod, fun_name)) do
           {:ok, %{count: unquote(repo_module).aggregate(query, :count)}}
         end
       end
@@ -554,9 +583,8 @@ defmodule Graphism.Api do
     fun =
       quote do
         def batch_create(items, opts \\ []) do
-          case unquote(repo_module).insert_all(unquote(schema_module), items, opts) do
-            {count, _} -> {:ok, count}
-            other -> {:error, other}
+          with {count, _} <- unquote(repo_module).insert_all(unquote(schema_module), items, opts) do
+            {:ok, count}
           end
         end
       end
@@ -697,7 +725,7 @@ defmodule Graphism.Api do
 
   defp api_custom_list_fun(e, action, opts, _schema_module, repo_module, _schema, hooks) do
     using_mod = opts[:using]
-    scope_mod = Entity.scope_hook!(e, opts, action, hooks)
+    scope_mod = Hooks.auth_module(hooks)
 
     unless using_mod do
       raise "custom action #{action} of #{e[:name]} does not define a :using option"
@@ -706,7 +734,7 @@ defmodule Graphism.Api do
     quote do
       def unquote(action)(args, context \\ %{}) do
         with {:ok, query} <- unquote(using_mod).execute(args, context),
-             query <- scoped_query(query, unquote(scope_mod), context, unquote(action)),
+             unquote(scoped_query_invocation(scope_mod, action)),
              {:ok, query} <- maybe_paginate(query, context) do
           {:ok, unquote(repo_module).all(query)}
         end
@@ -717,7 +745,7 @@ defmodule Graphism.Api do
   defp api_custom_list_aggregate_fun(e, action, opts, _schema_module, repo_module, _schema, hooks) do
     fun_name = String.to_atom("aggregate_#{action}")
     using_mod = opts[:using]
-    scope_mod = Entity.scope_hook!(e, opts, action, hooks)
+    scope_mod = Hooks.auth_module(hooks)
 
     unless using_mod do
       raise "custom action #{action} of #{e[:name]} does not define a :using option"
@@ -726,7 +754,7 @@ defmodule Graphism.Api do
     quote do
       def unquote(fun_name)(args, context \\ %{}) do
         with {:ok, query} <- unquote(using_mod).execute(args, context),
-             query <- scoped_query(query, unquote(scope_mod), context, unquote(action)) do
+             unquote(scoped_query_invocation(scope_mod, action)) do
           {:ok, %{count: unquote(repo_module).aggregate(query, :count)}}
         end
       end
@@ -739,9 +767,10 @@ defmodule Graphism.Api do
     quote do
       def get_by_id(id, opts \\ []) do
         preloads =
-          case opts[:skip_preloads] do
-            true -> []
-            _ -> unquote(preloads) ++ (opts[:preload] || [])
+          if opts[:skip_preloads] do
+            []
+          else
+            unquote(preloads) ++ (opts[:preload] || [])
           end
 
         case unquote(schema_module)
@@ -804,9 +833,10 @@ defmodule Graphism.Api do
       quote do
         def unquote(fun_name)(unquote_splicing(args), opts \\ []) do
           preloads =
-            case opts[:skip_preloads] do
-              true -> []
-              _ -> unquote(preloads) ++ (opts[:preload] || [])
+            if opts[:skip_preloads] do
+              []
+            else
+              unquote(preloads) ++ (opts[:preload] || [])
             end
 
           filters = [unquote_splicing(filters)]
@@ -873,9 +903,10 @@ defmodule Graphism.Api do
           ]
 
           preloads =
-            case opts[:skip_preloads] do
-              true -> []
-              _ -> unquote(preloads) ++ (opts[:preload] || [])
+            if opts[:skip_preloads] do
+              []
+            else
+              unquote(preloads) ++ (opts[:preload] || [])
             end
 
           case unquote(schema_module)
