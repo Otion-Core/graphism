@@ -462,6 +462,27 @@ Custom Absinthe middlewares can be also be plugged:
 use Graphism, repo: ..., middleware: [My.Middleware]
 ```
 
+### Authorization
+
+Graphism does not implement any specific authorization or access control scheme, however it provides a few callbacks so
+that you can implement your own.
+
+```elixir
+defmodule MySchema do
+  use Graphism, repo: MyRepo, field_auth: true
+
+  allow(MyAuth)
+  ...
+end
+```
+
+In the above example:
+
+* `field_auth` defines whether we want to apply access control to **every single field** in a response.
+* `MyAuth` is an allow hook that needs to implement both `allow/2` and `scope/2`.
+
+Please note authorization is completely optional. 
+
 ### Skippable migrations
 
 Sometimes we need to write our own custom migrations. It is possible to tell Graphism to ignore these

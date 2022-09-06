@@ -39,6 +39,7 @@ defmodule Graphism do
 
     repo = opts[:repo]
     styles = opts[:styles] || [:graphql]
+    field_auth = Keyword.get(opts, :field_auth, true)
 
     if repo != nil do
       Module.register_attribute(__CALLER__.module, :repo,
@@ -81,7 +82,8 @@ defmodule Graphism do
               import_types(Absinthe.Plug.Types)
               import_types(Graphism.Type.Graphql.Json)
               @sources [unquote(__CALLER__.module).Dataloader.Repo]
-              @fields_auth unquote(__CALLER__.module).FieldsAuth
+              @field_auth? unquote(field_auth)
+              @field_auth_middleware unquote(__CALLER__.module).FieldsAuth
               @middleware unquote(middleware)
 
               def context(ctx) do
@@ -98,7 +100,11 @@ defmodule Graphism do
               end
 
               def middleware(middleware, _field, _object) do
-                @middleware ++ middleware ++ [@fields_auth, Graphism.ErrorMiddleware]
+                if @field_auth? do
+                  @middleware ++ middleware ++ [@field_auth_middleware, Graphism.ErrorMiddleware]
+                else
+                  @middleware ++ middleware ++ [Graphism.ErrorMiddleware]
+                end
               end
             end
           end
