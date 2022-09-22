@@ -50,8 +50,6 @@ defmodule Graphism do
       Module.put_attribute(__CALLER__.module, :repo, repo)
       Module.put_attribute(__CALLER__.module, :styles, styles)
 
-      alias Dataloader, as: DL
-
       middleware =
         Enum.map(opts[:middleware] || [], fn {:__aliases__, _, mod} ->
           Module.concat(mod)
@@ -64,46 +62,25 @@ defmodule Graphism do
         unquote do
           if Enum.member?(styles, :graphql) do
             quote do
-              defmodule Dataloader.Repo do
-                @queryables unquote(__CALLER__.module).DataloaderQueries
-
-                def data do
-                  DL.Ecto.new(unquote(repo), query: &query/2)
-                end
-
-                def query(queryable, params) do
-                  @queryables.query(queryable, params)
-                end
-              end
-
               use Absinthe.Schema
-              import Absinthe.Resolution.Helpers, only: [dataloader: 1]
               import_types(Absinthe.Type.Custom)
               import_types(Absinthe.Plug.Types)
               import_types(Graphism.Type.Graphql.Json)
-              @sources [unquote(__CALLER__.module).Dataloader.Repo]
               @field_auth? unquote(field_auth)
               @field_auth_middleware unquote(__CALLER__.module).FieldsAuth
               @middleware unquote(middleware)
 
-              def context(ctx) do
-                loader =
-                  Enum.reduce(@sources, DL.new(), fn source, loader ->
-                    DL.add_source(loader, source, source.data())
-                  end)
-
-                Map.put(ctx, :loader, loader)
-              end
+              def context(ctx), do: Map.put(ctx, :loader, __MODULE__.Dataloader.new())
 
               def plugins do
-                [Absinthe.Middleware.Dataloader] ++ Absinthe.Plugin.defaults()
+                @middleware ++ [__MODULE__.Dataloader.Absinthe] ++ Absinthe.Plugin.defaults()
               end
 
               def middleware(middleware, _field, _object) do
                 if @field_auth? do
-                  @middleware ++ middleware ++ [@field_auth_middleware, Graphism.ErrorMiddleware]
+                  middleware ++ [@field_auth_middleware, Graphism.ErrorMiddleware]
                 else
-                  @middleware ++ middleware ++ [Graphism.ErrorMiddleware]
+                  middleware ++ [Graphism.ErrorMiddleware]
                 end
               end
             end
@@ -241,6 +218,8 @@ defmodule Graphism do
           Graphism.Api.api_module(e, schema, hooks, repo: repo, caller: __CALLER__)
         end)
 
+      dataloader_module = Graphism.Dataloader.dataloader_module(caller: __CALLER__)
+
       rest_modules =
         if Enum.member?(styles, :rest) do
           openapi_module = Graphism.Openapi.spec_module(schema, caller: __CALLER__)
@@ -275,8 +254,8 @@ defmodule Graphism do
               )
             end)
 
-          graphql_dataloader_queries = Graphism.Graphql.dataloader_queries(schema)
           graphql_fields_auth = Graphism.Graphql.fields_auth_module(schema, auth_hook)
+          graphql_dataloader_middleware = Graphism.Dataloader.absinthe_middleware(caller: __CALLER__)
           graphql_enums = Graphism.Graphql.enums(enums)
           graphql_objects = Graphism.Graphql.objects(schema, caller: __CALLER__.module)
           graphql_self_resolver = Graphism.Graphql.self_resolver()
@@ -289,7 +268,7 @@ defmodule Graphism do
 
           [
             graphql_resolver_modules,
-            graphql_dataloader_queries,
+            graphql_dataloader_middleware,
             graphql_fields_auth,
             graphql_enums,
             graphql_objects,
@@ -311,7 +290,8 @@ defmodule Graphism do
           schema_fun,
           schema_empty_modules,
           schema_modules,
-          api_modules
+          api_modules,
+          dataloader_module
         ] ++ graphql_modules ++ rest_modules
       )
     end

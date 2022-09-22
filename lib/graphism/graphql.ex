@@ -3,29 +3,6 @@ defmodule Graphism.Graphql do
 
   alias Graphism.Entity
 
-  def dataloader_queries(schema) do
-    quote do
-      defmodule DataloaderQueries do
-        import Ecto.Query, only: [from: 2]
-
-        (unquote_splicing(
-           Enum.map(schema, fn e ->
-             schema_module = e[:schema_module]
-             preloads = Entity.preloads(e)
-
-             quote do
-               def query(unquote(schema_module) = schema, _) do
-                 from(q in schema,
-                   preload: unquote(preloads)
-                 )
-               end
-             end
-           end)
-         ))
-      end
-    end
-  end
-
   def enums(enums) do
     enums = [{:asc_desc, [:asc, :desc]} | enums]
 
@@ -322,7 +299,7 @@ defmodule Graphism.Graphql do
     end)
   end
 
-  defp graphql_relation_fields(e, _schema, opts) do
+  defp graphql_relation_fields(e, schema, opts) do
     e[:relations]
     |> Enum.reject(fn rel ->
       # inside input types, we don't want to include children
@@ -398,7 +375,7 @@ defmodule Graphism.Graphql do
                 field(
                   unquote(rel[:name]),
                   unquote(kind),
-                  resolve: dataloader(unquote(opts[:caller]).Dataloader.Repo)
+                  resolve: unquote(Graphism.Dataloader.resolve_fun(e, rel, schema))
                 )
               end
 

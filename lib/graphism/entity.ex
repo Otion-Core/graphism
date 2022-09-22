@@ -58,6 +58,7 @@ defmodule Graphism.Entity do
   def client_ids?(e), do: modifier?(e, :client_ids)
   def refetch?(e), do: modifier?(e, :refetch)
   def internal?(e), do: modifier?(e, :internal)
+  def scope_results?(e), do: modifier?(e, :scope_results)
 
   def id?(attr), do: attr[:name] == :id
   def computed?(field), do: modifier?(field, :computed)

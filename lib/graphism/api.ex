@@ -224,6 +224,7 @@ defmodule Graphism.Api do
 
     List.flatten([
       api_list_all_funs(e, schema_module, repo_module, scope_mod),
+      api_list_by_ids_funs(e, schema_module, repo_module, scope_mod),
       api_list_by_parent_funs(e, schema_module, repo_module, scope_mod),
       api_list_by_non_unique_key_funs(e, schema_module, repo_module, scope_mod)
     ]) ++ funs
@@ -268,6 +269,47 @@ defmodule Graphism.Api do
     end
   end
 
+  defp api_list_by_ids_funs(e, schema_module, repo_module, scope_mod) do
+    [
+      api_list_by_ids_instrumented_fun(e),
+      api_list_by_ids_internal_fun(e, schema_module, repo_module, scope_mod)
+    ]
+  end
+
+  defp api_list_by_ids_instrumented_fun(e) do
+    fun_name = :list_by_ids
+    internal_fun_name = internal_fun_name(:list_by_ids)
+
+    quote do
+      def unquote(fun_name)(ids, context \\ %{}) do
+        meta = %{entity: unquote(e[:name]), action: unquote(fun_name)}
+
+        :telemetry.span([:graphism, :api], meta, fn ->
+          {unquote(internal_fun_name)(ids, context), meta}
+        end)
+      end
+    end
+  end
+
+  defp api_list_by_ids_internal_fun(e, schema_module, repo_module, scope_mod) do
+    fun_name = :list_by_ids
+    internal_fun_name = internal_fun_name(:list_by_ids)
+
+    quote do
+      defp unquote(internal_fun_name)(ids, context) do
+        query =
+          from(unquote(Ast.var(e)) in unquote(schema_module))
+          |> where([q], q.id in ^ids)
+
+        with unquote(scoped_query_invocation(scope_mod, fun_name)),
+             {:ok, query} <- maybe_paginate(query, context),
+             {:ok, query} <- maybe_with_preloads(query) do
+          {:ok, unquote(repo_module).all(query)}
+        end
+      end
+    end
+  end
+
   defp api_list_by_parent_funs(e, schema_module, repo_module, scope_mod) do
     e[:relations]
     |> Enum.filter(fn rel -> rel[:kind] == :belongs_to end)
@@ -299,10 +341,16 @@ defmodule Graphism.Api do
     internal_fun_name = internal_fun_name(fun_name)
 
     quote do
-      defp unquote(internal_fun_name)(id, context \\ %{}) do
+      defp unquote(internal_fun_name)(id, context \\ %{})
+
+      defp unquote(internal_fun_name)(id, context) when is_binary(id) do
+        unquote(internal_fun_name)([id], context)
+      end
+
+      defp unquote(internal_fun_name)(ids, context) when is_list(ids) do
         query =
           from(unquote(Ast.var(rel)) in unquote(schema_module))
-          |> where([q], q.unquote(String.to_atom("#{rel[:name]}_id")) == ^id)
+          |> where([q], q.unquote(String.to_atom("#{rel[:name]}_id")) in ^ids)
 
         with unquote(scoped_query_invocation(scope_mod, fun_name)),
              {:ok, query} <- maybe_paginate(query, context),
