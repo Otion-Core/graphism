@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+* List arguments in custom actions - [#128](https://github.com/Gravity-Core/graphism/pull/128)
+
 ## 0.8.3 (September 6th, 2022)
 
 * Optional field auth - [#126](https://github.com/Gravity-Core/graphism/pull/126)
