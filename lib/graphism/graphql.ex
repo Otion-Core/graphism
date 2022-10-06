@@ -1014,17 +1014,27 @@ defmodule Graphism.Graphql do
 
   defp graphql_args(args, e) do
     Enum.map(args, fn
-      {arg, {kind, :optional}} ->
+      {arg, {:list, kind, :optional}} when is_atom(kind) ->
+        quote do
+          arg(unquote(arg), list_of(unquote(kind)))
+        end
+
+      {arg, {kind, :optional}} when is_atom(kind) ->
         quote do
           arg(unquote(arg), unquote(kind))
         end
 
-      {arg, kind} ->
+      {arg, {:list, kind}} when is_atom(kind) ->
+        quote do
+          arg(unquote(arg), list_of(non_null(unquote(kind))))
+        end
+
+      {arg, kind} when is_atom(kind) ->
         quote do
           arg(unquote(arg), non_null(unquote(kind)))
         end
 
-      arg ->
+      arg when is_atom(arg) ->
         kind =
           case Entity.attribute(e, arg) do
             nil ->

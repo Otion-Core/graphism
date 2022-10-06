@@ -223,7 +223,7 @@ defmodule Graphism do
       schema_fun =
         quote do
           def schema do
-            unquote(schema)
+            unquote(Macro.escape(schema))
           end
         end
 

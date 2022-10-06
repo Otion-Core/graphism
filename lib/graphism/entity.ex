@@ -832,11 +832,18 @@ defmodule Graphism.Entity do
     end
   end
 
-  def with_action_args(opts) do
+  def with_action_args(opts, _entity_name) do
     if opts[:produces] && !opts[:args] do
       Keyword.put(opts, :args, [:id])
     else
-      args = opts[:args]
+      args =
+        Enum.map(opts[:args], fn
+          {name, {:{}, _, [:list, kind, :optional]}} -> {name, {:list, kind, :optional}}
+          {name, {:{}, _, [:list, kind]}} -> {name, {:list, kind}}
+          {name, kind} -> {name, kind}
+          name when is_atom(name) -> name
+        end)
+
       Keyword.put(opts, :args, args)
     end
   end
@@ -870,7 +877,7 @@ defmodule Graphism.Entity do
       |> with_action_hook(:before)
       |> with_action_hook(:after)
       |> with_action_produces(entity_name)
-      |> with_action_args()
+      |> with_action_args(entity_name)
       |> with_action_hook(:allow)
       |> with_action_hook(:scope)
 
