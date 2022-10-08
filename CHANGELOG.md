@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+* Drop tables after indices - [#130](https://github.com/Gravity-Core/graphism/pull/130)
 * List arguments in custom actions - [#128](https://github.com/Gravity-Core/graphism/pull/128)
 
 ## 0.8.3 (September 6th, 2022)

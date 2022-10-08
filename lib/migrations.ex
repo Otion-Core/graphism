@@ -1218,16 +1218,16 @@ defmodule Graphism.Migrations do
           {m, 1000 + table_index(tables, m[:table])}
 
         {:drop, :table} ->
-          {m, -1000 - table_index(tables, m[:table])}
+          {m, -2000 - table_index(tables, m[:table])}
 
         {:alter, :table} ->
           {m, 0}
 
         {:create, :enum} ->
-          {m, 2000}
+          {m, 3000}
 
         {:drop, :enum} ->
-          {m, -2000}
+          {m, -3000}
 
         {:alter, :enum} ->
           {m, 1000}
