@@ -300,6 +300,12 @@ defmodule Graphism.Entity do
     |> Enum.filter(fn rel -> rel[:kind] == :belongs_to end)
   end
 
+  def child_relations(e) do
+    e
+    |> relations()
+    |> Enum.filter(fn rel -> rel[:kind] == :has_many end)
+  end
+
   def hook!(hooks, kind, name) do
     hook = Hooks.find(hooks, kind, name)
 
