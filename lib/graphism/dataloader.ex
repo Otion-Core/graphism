@@ -32,6 +32,8 @@ defmodule Graphism.Dataloader do
         end
 
         def run(%__MODULE__{specs: specs, cache: old_cache} = loader, context \\ %{}) do
+          contet = context = Map.drop(context, [:loader, :__absinthe_plug__, :pubsub])
+
           cache =
             specs
             |> Map.values()
@@ -43,6 +45,13 @@ defmodule Graphism.Dataloader do
             end)
             |> Enum.map(fn {{m, f} = key, ids} ->
               api = Module.concat([m, Api])
+
+              context =
+                Map.put(contet, :graphism, %{
+                  entity: m.entity(),
+                  action: :list,
+                  schema: m
+                })
 
               case apply(api, f, [ids, context]) do
                 {:ok, items} ->
