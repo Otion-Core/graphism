@@ -15,26 +15,34 @@ defmodule Graphism.Dataloader do
         defmodule Spec do
           defstruct name: nil, source: nil, value: nil, items: [], pending: true
 
-          def new(name, source, value) do
-            %__MODULE__{name: name, source: source, value: value}
+          def new(name, {m, f, ids, _}, value) do
+            ids = Enum.uniq(ids)
+
+            %__MODULE__{name: name, source: {m, f, ids}, value: value}
           end
         end
 
         def new, do: %__MODULE__{}
 
         def load(%__MODULE__{specs: specs} = loader, name, source, value) do
-          spec =
-            name
-            |> Spec.new(source, value)
-            |> maybe_resolve(loader)
+          case Map.get(specs, name) do
+            nil ->
+              spec =
+                name
+                |> Spec.new(source, value)
+                |> maybe_resolve(loader)
 
-          %{loader | specs: Map.put(specs, name, spec)}
+              %{loader | specs: Map.put(specs, name, spec)}
+
+            _ ->
+              loader
+          end
         end
 
         def run(%__MODULE__{specs: specs, cache: old_cache} = loader, context \\ %{}) do
           contet = context = Map.drop(context, [:loader, :__absinthe_plug__, :pubsub])
 
-          cache =
+          to_query =
             specs
             |> Map.values()
             |> Enum.filter(& &1.pending)
@@ -43,13 +51,15 @@ defmodule Graphism.Dataloader do
               ids = Map.get(acc, key, [])
               Map.put(acc, key, Enum.uniq(new_ids ++ ids))
             end)
-            |> Enum.map(fn {{m, f} = key, ids} ->
+
+          results =
+            Enum.map(to_query, fn {{m, f} = key, ids} ->
               api = Module.concat([m, Api])
 
               context =
                 Map.put(contet, :graphism, %{
                   entity: m.entity(),
-                  action: :list,
+                  action: :read,
                   schema: m
                 })
 
@@ -61,7 +71,9 @@ defmodule Graphism.Dataloader do
                   {key, []}
               end
             end)
-            |> Enum.reduce(old_cache, fn {{m, _}, new_items}, acc ->
+
+          cache =
+            Enum.reduce(results, old_cache, fn {{m, _}, new_items}, acc ->
               items = Map.get(acc, m, %{})
 
               items =
@@ -76,9 +88,7 @@ defmodule Graphism.Dataloader do
 
           specs =
             specs
-            |> Enum.map(fn {name, spec} ->
-              {name, maybe_resolve(spec, loader)}
-            end)
+            |> Enum.map(fn {name, spec} -> {name, resolve(spec, loader)} end)
             |> Enum.into(%{})
 
           %{loader | cache: cache, specs: specs}
@@ -94,12 +104,34 @@ defmodule Graphism.Dataloader do
           |> Map.fetch!(:items)
         end
 
-        defp maybe_resolve(%Spec{source: {schema, _, _}, value: value_fn} = spec, %__MODULE__{cache: cache} = loader) do
-          case Map.get(cache, schema, nil) do
-            nil -> %Spec{spec | pending: true, items: []}
-            items -> %Spec{spec | pending: false, items: value_fn.(items)}
+        defp resolve(%Spec{source: {schema, _, _}, value: value_fn} = spec, %__MODULE__{} = loader) do
+          items = Map.get(loader.cache, schema, %{})
+          %Spec{spec | pending: false, items: value_fn.(items)}
+        end
+
+        defp maybe_resolve(
+               %Spec{source: {schema, :list_by_ids, ids}, value: value_fn} = spec,
+               %__MODULE__{} = loader
+             ) do
+          case Map.get(loader.cache, schema, nil) do
+            nil ->
+              %Spec{spec | pending: true, items: nil}
+
+            items ->
+              pending = Enum.any?(ids, &(!Map.has_key?(items, &1)))
+
+              items =
+                if !pending do
+                  value_fn.(items)
+                else
+                  nil
+                end
+
+              %Spec{spec | pending: pending, items: items}
           end
         end
+
+        defp maybe_resolve(%Spec{} = spec, _loader), do: spec
       end
     end
   end
@@ -125,7 +157,9 @@ defmodule Graphism.Dataloader do
         end
 
         @impl Absinthe.Plugin
-        def after_resolution(exec), do: exec
+        def after_resolution(exec) do
+          exec
+        end
 
         @impl Absinthe.Middleware
         def call(%{state: :unresolved} = resolution, {loader, callback}) do
@@ -167,23 +201,44 @@ defmodule Graphism.Dataloader do
 
   def resolve_fun(e, rel, schema) do
     target_entity = Entity.find_entity!(schema, rel[:target])
+    kind = Keyword.fetch!(rel, :kind)
 
-    quote do
-      fn parent, args, %{context: context} ->
+    do_dataloader =
+      quote do
         case Map.get(parent, unquote(rel[:name])) do
           %{__struct__: Ecto.Association.NotLoaded} ->
             name = unquote(dataloader_key_name(e, rel))
-            source = unquote(dataloader_source(schema, e, target_entity, rel, rel[:kind]))
-            value = unquote(dataloader_value_fun(schema, e, target_entity, rel, rel[:kind]))
+            source = unquote(dataloader_source(schema, e, target_entity, rel, kind))
+            value = unquote(dataloader_value_fun(schema, e, target_entity, rel, kind))
             callback = unquote(dataloader_callback_fun())
             loader = __MODULE__.Dataloader.load(context.loader, name, source, value)
-
             {:middleware, __MODULE__.Dataloader.Absinthe, {loader, callback}}
 
           other ->
             {:ok, other}
         end
       end
+
+    case kind do
+      :has_many ->
+        quote do
+          fn parent, args, %{context: context} ->
+            unquote(do_dataloader)
+          end
+        end
+
+      :belongs_to ->
+        quote do
+          fn parent, args, %{context: context} ->
+            case parent.unquote(rel[:column]) do
+              nil ->
+                {:ok, nil}
+
+              _id ->
+                unquote(do_dataloader)
+            end
+          end
+        end
     end
   end
 
@@ -205,22 +260,27 @@ defmodule Graphism.Dataloader do
 
   defp dataloader_source(schema, e, target, rel, :has_many) do
     inverse_rel = Entity.inverse_relation!(schema, e, rel[:name])
+    schema_module = Keyword.fetch!(e, :schema_module)
 
     quote do
       {
         unquote(target[:schema_module]),
         unquote(String.to_atom("list_by_#{inverse_rel[:name]}")),
-        [parent.id]
+        [parent.id],
+        unquote(schema_module)
       }
     end
   end
 
   defp dataloader_source(_schema, _e, target, rel, :belongs_to) do
+    schema_module = Keyword.fetch!(target, :schema_module)
+
     quote do
       {
-        unquote(target[:schema_module]),
+        unquote(schema_module),
         unquote(:list_by_ids),
-        [parent.unquote(rel[:column])]
+        [parent.unquote(rel[:column])],
+        unquote(schema_module)
       }
     end
   end

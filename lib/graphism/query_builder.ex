@@ -95,7 +95,9 @@ defmodule Graphism.QueryBuilder do
 
   """
 
-  def funs() do
+  def funs(opts) do
+    repo = Keyword.fetch!(opts, :repo)
+
     quote do
       import Ecto.Query
 
@@ -200,6 +202,97 @@ defmodule Graphism.QueryBuilder do
       defp combine(nil, prev, _), do: prev
       defp combine(q, prev, :union), do: Ecto.Query.union(prev, ^q)
       defp combine(q, prev, :intersect), do: Ecto.Query.intersect(prev, ^q)
+
+      def evaluate(nil, _), do: nil
+      def evaluate(value, []), do: value
+
+      def evaluate(%{__struct__: _} = context, [:"**"]), do: context
+
+      def evaluate(%{__struct__: schema} = context, [field]) when is_atom(field) do
+        case schema.field_spec(field) do
+          {:error, :unknown_field} ->
+            if schema.entity() == field do
+              context
+            else
+              Map.get(context, field)
+            end
+
+          {:ok, _kind, _column} ->
+            Map.fetch!(context, field)
+
+          {:ok, :has_many, _, _next_schema} ->
+            context
+            |> relation(field)
+            |> Enum.reject(&is_nil/1)
+
+          {:ok, :belongs_to, _, _, _column} ->
+            relation(context, field)
+        end
+      end
+
+      def evaluate(%{__struct__: schema} = context, [:"**", ancestor | rest]) do
+        case schema.shortest_path_to(ancestor) do
+          [] ->
+            if schema.entity() == ancestor do
+              evaluate(context, rest)
+            else
+              nil
+            end
+
+          path ->
+            evaluate(context, path ++ rest)
+        end
+      end
+
+      def evaluate(%{__struct__: _} = context, [field | _] = paths) when is_list(field) do
+        paths
+        |> Enum.map(&evaluate(context, &1))
+        |> List.flatten()
+        |> Enum.reject(&is_nil/1)
+        |> Enum.uniq()
+      end
+
+      def evaluate(%{__struct__: schema} = context, [field | rest]) do
+        case schema.field_spec(field) do
+          {:error, :unknown_field} ->
+            nil
+
+          {:ok, _kind, _column} ->
+            nil
+
+          {:ok, :has_many, _, _next_schema} ->
+            context
+            |> relation(field)
+            |> Enum.map(&evaluate(&1, rest))
+            |> List.flatten()
+            |> Enum.reject(&is_nil/1)
+            |> Enum.uniq()
+
+          {:ok, :belongs_to, _, _next_schema, _} ->
+            context
+            |> relation(field)
+            |> evaluate(rest)
+        end
+      end
+
+      defp relation(%{__struct__: schema} = context, field) do
+        with rel when rel != nil <- Map.get(context, field) do
+          if unloaded?(rel) do
+            key = {schema.entity(), field}
+
+            with nil <- Process.get(key) do
+              rel = context |> unquote(repo).preload(field) |> Map.get(field)
+              Process.put(key, rel)
+              rel
+            end
+          else
+            rel
+          end
+        end
+      end
+
+      defp unloaded?(%{__struct__: Ecto.Association.NotLoaded}), do: true
+      defp unloaded?(_), do: false
     end
   end
 end

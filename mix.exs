@@ -27,7 +27,7 @@ defmodule Graphism.MixProject do
       {:absinthe_plug, "~> 1.5"},
       {:calendar, "~> 1.0.0"},
       {:ecto, "~> 3.9"},
-      {:ecto_sql, "~> 3.4"},
+      {:ecto_sql, "~> 3.9"},
       {:jason, "~> 1.2"},
       {:inflex, "~> 2.0.0"},
       {:libgraph, "~> 0.13.3"},
