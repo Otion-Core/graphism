@@ -154,48 +154,53 @@ defmodule Graphism.QueryBuilder do
         filter(schema, ancestor_path ++ rest, op, value, q, last_binding)
       end
 
-      def filter(schema, [field | rest] = path, op, value, q, last_binding) do
-        if schema.field_spec(field) == {:error, :unknown_field} do
-          if schema.entity() == field do
-            if rest == [] do
-              do_filter(schema, [:id], op, value, q, last_binding)
+      def filter(schema, [field], op, value, q, last_binding) do
+        case schema.field_spec(field) do
+          {:error, :unknown_field} ->
+            if schema.entity() == field do
+              schema.filter(q, :id, op, value, on: last_binding)
             else
-              filter(schema, rest, op, value, q, last_binding)
+              nil
             end
-          else
-            nil
-          end
-        else
-          do_filter(schema, path, op, value, q, last_binding)
+
+          {:ok, _, _column} ->
+            schema.filter(q, field, op, value, on: last_binding)
+
+          {:ok, :has_many, _, _child_schema} ->
+            {field, binding} = query_binding(field)
+            schema.filter(q, field, op, value, parent: last_binding, child: binding)
+
+          {:ok, :belongs_to, _, _parent_schema, _} ->
+            schema.filter(q, field, op, value, parent: last_binding)
         end
       end
 
-      defp do_filter(schema, [field | rest], op, value, q, last_binding) do
-        {field, binding} =
-          case field do
-            {field, binding} -> {field, binding}
-            field -> {field, field}
-          end
-
+      def filter(schema, [field | rest], op, value, q, last_binding) do
         case schema.field_spec(field) do
           {:error, :unknown_field} ->
-            nil
+            if schema.entity() == field do
+              filter(schema, rest, op, value, q, last_binding)
+            else
+              nil
+            end
 
           {:ok, _, _column} ->
             schema.filter(q, field, op, value, on: last_binding)
 
           {:ok, :has_many, _, next_schema} ->
+            {field, binding} = query_binding(field)
             q = schema.join(q, field, parent: last_binding, child: binding)
             filter(next_schema, rest, op, value, q, binding)
 
-          {:ok, :belongs_to, _, _next_schema, _} when rest == [] ->
-            schema.filter(q, field, op, value, parent: last_binding)
-
           {:ok, :belongs_to, _, next_schema, _} ->
+            {field, binding} = query_binding(field)
             q = schema.join(q, field, parent: binding, child: last_binding)
             filter(next_schema, rest, op, value, q, binding)
         end
       end
+
+      defp query_binding({_, _} = field), do: field
+      defp query_binding(field) when is_atom(field), do: {field, field}
 
       defp combine(q, q, _), do: q
       defp combine(q, nil, _), do: q

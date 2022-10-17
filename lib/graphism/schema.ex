@@ -360,54 +360,67 @@ defmodule Graphism.Schema do
         )
 
         unquote_splicing(
+          e
+          |> Entity.child_relations()
+          |> Enum.map(fn rel ->
+            quote do
+              def filter(q, unquote(rel[:name]), op, value, opts) do
+                child_binding = Keyword.get(opts, :child, unquote(rel[:name]))
+
+                q
+                |> __MODULE__.join(unquote(rel[:name]), opts)
+                |> do_filter(:id, op, value, child_binding)
+              end
+            end
+          end)
+        )
+
+        unquote_splicing(
           e[:attributes]
           |> Enum.reject(&Entity.virtual?/1)
           |> Enum.map(fn attr ->
             column_name = attr[:name]
 
             quote do
-              def filter(q, unquote(attr[:name]), op, nil, opts) do
+              def filter(q, unquote(attr[:name]), op, value, opts) do
                 binding = Keyword.get(opts, :on, unquote(e[:name]))
-                where(q, [{^binding, e}], is_nil(e.unquote(column_name)))
-              end
-
-              def filter(q, unquote(attr[:name]), :eq, value, opts) do
-                binding = Keyword.get(opts, :on, unquote(e[:name]))
-                where(q, [{^binding, e}], e.unquote(column_name) == ^value)
-              end
-
-              def filter(q, unquote(attr[:name]), :neq, value, opts) do
-                binding = Keyword.get(opts, :on, unquote(e[:name]))
-                where(q, [{^binding, e}], e.unquote(column_name) != ^value)
-              end
-
-              def filter(q, unquote(attr[:name]), :gte, value, opts) do
-                binding = Keyword.get(opts, :on, unquote(e[:name]))
-                where(q, [{^binding, e}], e.unquote(column_name) >= ^value)
-              end
-
-              def filter(q, unquote(attr[:name]), :gt, value, opts) do
-                binding = Keyword.get(opts, :on, unquote(e[:name]))
-                where(q, [{^binding, e}], e.unquote(column_name) > ^value)
-              end
-
-              def filter(q, unquote(attr[:name]), :lte, value, opts) do
-                binding = Keyword.get(opts, :on, unquote(e[:name]))
-                where(q, [{^binding, e}], e.unquote(column_name) <= ^value)
-              end
-
-              def filter(q, unquote(attr[:name]), :lt, value, opts) do
-                binding = Keyword.get(opts, :on, unquote(e[:name]))
-                where(q, [{^binding, e}], e.unquote(column_name) < ^value)
-              end
-
-              def filter(q, unquote(attr[:name]), :in, values, opts) when is_list(values) do
-                binding = Keyword.get(opts, :on, unquote(e[:name]))
-                where(q, [{^binding, e}], e.unquote(column_name) in ^values)
+                do_filter(q, unquote(column_name), op, value, binding)
               end
             end
           end)
         )
+
+        defp do_filter(q, column_name, _, nil, binding) do
+          where(q, [{^binding, e}], is_nil(field(e, ^column_name)))
+        end
+
+        defp do_filter(q, column_name, :eq, value, binding) do
+          where(q, [{^binding, e}], field(e, ^column_name) == ^value)
+        end
+
+        defp do_filter(q, column_name, :neq, value, binding) do
+          where(q, [{^binding, e}], field(e, ^column_name) != ^value)
+        end
+
+        defp do_filter(q, column_name, :gte, value, binding) do
+          where(q, [{^binding, e}], field(e, ^column_name) >= ^value)
+        end
+
+        defp do_filter(q, column_name, :gt, value, binding) do
+          where(q, [{^binding, e}], field(e, ^column_name) > ^value)
+        end
+
+        defp do_filter(q, column_name, :lte, value, binding) do
+          where(q, [{^binding, e}], field(e, ^column_name) <= ^value)
+        end
+
+        defp do_filter(q, column_name, :lt, value, binding) do
+          where(q, [{^binding, e}], field(e, ^column_name) < ^value)
+        end
+
+        defp do_filter(q, column_name, :in, values, binding) when is_list(values) do
+          where(q, [{^binding, e}], field(e, ^column_name) in ^values)
+        end
       end
     end
   end
