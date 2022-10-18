@@ -1,7 +1,7 @@
 defmodule Graphism.Schema do
   @moduledoc "Generates entity schema modules"
 
-  alias Graphism.{Entity, Migrations}
+  alias Graphism.{Ast, Entity, Migrations}
 
   def empty_modules(schema) do
     schema
@@ -18,11 +18,13 @@ defmodule Graphism.Schema do
     indices = Migrations.indices_from_attributes(e) ++ Migrations.indices_from_keys(e)
     stored_attributes = Enum.reject(e[:attributes], fn attr -> attr[:name] == :id or Entity.virtual?(attr) end)
     scope_columns = Enum.map(e[:opts][:scope] || [], fn col -> String.to_atom("#{col}_id") end)
+    schema_module = Keyword.fetch!(e, :schema_module)
 
     quote do
-      defmodule unquote(e[:schema_module]) do
+      defmodule unquote(schema_module) do
         use Ecto.Schema
         import Ecto.Changeset
+        import Ecto.Query
 
         def entity, do: unquote(e[:name])
 
@@ -146,7 +148,7 @@ defmodule Graphism.Schema do
         def computed_fields, do: @computed_fields
 
         unquote_splicing(
-          (Entity.names(stored_attributes) ++ [:inserted_at, :updated_at])
+          (Entity.names(stored_attributes) ++ [:id, :inserted_at, :updated_at])
           |> Enum.map(&attribute_field_spec_ast(e, &1, schema))
         )
 
@@ -164,8 +166,16 @@ defmodule Graphism.Schema do
         def field_specs(_), do: []
 
         unquote_splicing(relation_paths_ast(e, schema))
+        unquote_splicing(attribute_paths_ast(e, schema))
 
         def paths_to(_), do: []
+
+        def shortest_path_to(ancestor) do
+          ancestor
+          |> paths_to()
+          |> Enum.sort_by(&length/1)
+          |> List.first() || []
+        end
 
         def changeset(e, attrs) do
           changes =
@@ -260,6 +270,157 @@ defmodule Graphism.Schema do
 
           changes
         end
+
+        def query, do: from(unquote(Ast.var(e[:name])) in unquote(schema_module), as: unquote(e[:name]))
+
+        def join(q, rel, opts \\ [])
+
+        unquote_splicing(
+          e
+          |> Entity.parent_relations()
+          |> Enum.map(fn rel ->
+            target = Entity.find_entity!(schema, rel[:target])
+            column_name = Keyword.fetch!(rel, :column)
+            target_schema = Keyword.fetch!(target, :schema_module)
+
+            quote do
+              def join(q, unquote(rel[:name]), opts) do
+                parent_binding = Keyword.get(opts, :parent, unquote(rel[:name]))
+                child_binding = Keyword.get(opts, :child, unquote(e[:name]))
+
+                join(q, :inner, [{^child_binding, child}], parent in unquote(target_schema),
+                  as: ^parent_binding,
+                  on: parent.id == child.unquote(column_name)
+                )
+              end
+            end
+          end)
+        )
+
+        unquote_splicing(
+          e
+          |> Entity.child_relations()
+          |> Enum.map(fn rel ->
+            target = Entity.find_entity!(schema, rel[:target])
+            target_schema = Keyword.fetch!(target, :schema_module)
+            inverse_rel = Entity.inverse_relation!(schema, e, rel[:name])
+            column_name = Keyword.fetch!(inverse_rel, :column)
+
+            quote do
+              def join(q, unquote(rel[:name]), opts) do
+                parent_binding = Keyword.get(opts, :parent, unquote(inverse_rel[:name]))
+                child_binding = Keyword.get(opts, :child, unquote(rel[:name]))
+
+                join(q, :inner, [{^parent_binding, parent}], child in unquote(target_schema),
+                  as: ^child_binding,
+                  on: parent.id == child.unquote(column_name)
+                )
+              end
+            end
+          end)
+        )
+
+        def join(_, other, _) do
+          raise "Cannot join #{inspect(__MODULE__)} on #{inspect(other)}. No such relation."
+        end
+
+        unquote_splicing(
+          e
+          |> Entity.parent_relations()
+          |> Enum.map(fn rel ->
+            column_name = Keyword.fetch!(rel, :column)
+
+            quote do
+              def filter(q, unquote(rel[:name]), :eq, nil, opts) do
+                binding = Keyword.get(opts, :parent, unquote(rel[:name]))
+
+                where(q, [{^binding, e}], is_nil(e.unquote(column_name)))
+              end
+
+              def filter(q, unquote(rel[:name]), :eq, id, opts) do
+                binding = Keyword.get(opts, :parent, unquote(rel[:name]))
+
+                where(q, [{^binding, e}], e.unquote(column_name) == ^id)
+              end
+
+              def filter(q, unquote(rel[:name]), :neq, id, opts) do
+                binding = Keyword.get(opts, :parent, unquote(rel[:name]))
+
+                where(q, [{^binding, e}], e.unquote(column_name) != ^id)
+              end
+
+              def filter(q, unquote(rel[:name]), :in, ids, opts) when is_list(ids) do
+                binding = Keyword.get(opts, :parent, unquote(rel[:name]))
+
+                where(q, [{^binding, e}], e.unquote(column_name) in ^ids)
+              end
+            end
+          end)
+          |> List.flatten()
+        )
+
+        unquote_splicing(
+          e
+          |> Entity.child_relations()
+          |> Enum.map(fn rel ->
+            quote do
+              def filter(q, unquote(rel[:name]), op, value, opts) do
+                child_binding = Keyword.get(opts, :child, unquote(rel[:name]))
+
+                q
+                |> __MODULE__.join(unquote(rel[:name]), opts)
+                |> do_filter(:id, op, value, child_binding)
+              end
+            end
+          end)
+        )
+
+        unquote_splicing(
+          e[:attributes]
+          |> Enum.reject(&Entity.virtual?/1)
+          |> Enum.map(fn attr ->
+            column_name = attr[:name]
+
+            quote do
+              def filter(q, unquote(attr[:name]), op, value, opts) do
+                binding = Keyword.get(opts, :on, unquote(e[:name]))
+                do_filter(q, unquote(column_name), op, value, binding)
+              end
+            end
+          end)
+        )
+
+        defp do_filter(q, column_name, _, nil, binding) do
+          where(q, [{^binding, e}], is_nil(field(e, ^column_name)))
+        end
+
+        defp do_filter(q, column_name, :eq, value, binding) do
+          where(q, [{^binding, e}], field(e, ^column_name) == ^value)
+        end
+
+        defp do_filter(q, column_name, :neq, value, binding) do
+          where(q, [{^binding, e}], field(e, ^column_name) != ^value)
+        end
+
+        defp do_filter(q, column_name, :gte, value, binding) do
+          where(q, [{^binding, e}], field(e, ^column_name) >= ^value)
+        end
+
+        defp do_filter(q, column_name, :gt, value, binding) do
+          where(q, [{^binding, e}], field(e, ^column_name) > ^value)
+        end
+
+        defp do_filter(q, column_name, :lte, value, binding) do
+          where(q, [{^binding, e}], field(e, ^column_name) <= ^value)
+        end
+
+        defp do_filter(q, column_name, :lt, value, binding) do
+          where(q, [{^binding, e}], field(e, ^column_name) < ^value)
+        end
+
+        defp do_filter(q, column_name, :in, values, binding) when is_list(values) do
+          where(q, [{^binding, e}], field(e, ^column_name) in ^values)
+        end
       end
     end
   end
@@ -277,11 +438,16 @@ defmodule Graphism.Schema do
     camel_cased = Inflex.camelize(field, :lower)
 
     {column_name, type} =
-      if field in [:inserted_at, :updated_at] do
-        {field, :timestamp}
-      else
-        attr = Entity.attribute!(e, field)
-        {attr[:name], attr[:kind]}
+      cond do
+        field == :id ->
+          {:field, :string}
+
+        field in [:inserted_at, :updated_at] ->
+          {field, :timestamp}
+
+        true ->
+          attr = Entity.attribute!(e, field)
+          {attr[:name], attr[:kind]}
       end
 
     spec = {:ok, type, column_name}
@@ -413,6 +579,14 @@ defmodule Graphism.Schema do
         def paths_to(unquote(step)) do
           unquote(paths_to(step, paths))
         end
+      end
+    end)
+  end
+
+  defp attribute_paths_ast(e, _schema) do
+    Enum.map(e[:attributes], fn attr ->
+      quote do
+        def paths_to(unquote(attr[:name])), do: [[unquote(attr[:name])]]
       end
     end)
   end

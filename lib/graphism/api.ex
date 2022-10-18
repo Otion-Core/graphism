@@ -224,6 +224,7 @@ defmodule Graphism.Api do
 
     List.flatten([
       api_list_all_funs(e, schema_module, repo_module, scope_mod),
+      api_list_by_ids_funs(e, schema_module, repo_module, scope_mod),
       api_list_by_parent_funs(e, schema_module, repo_module, scope_mod),
       api_list_by_non_unique_key_funs(e, schema_module, repo_module, scope_mod)
     ]) ++ funs
@@ -257,7 +258,48 @@ defmodule Graphism.Api do
 
     quote do
       defp unquote(internal_fun_name)(context) do
-        query = from(unquote(Ast.var(e)) in unquote(schema_module))
+        query = from(unquote(Ast.var(e)) in unquote(schema_module), as: unquote(e[:name]))
+
+        with unquote(scoped_query_invocation(scope_mod, fun_name)),
+             {:ok, query} <- maybe_paginate(query, context),
+             {:ok, query} <- maybe_with_preloads(query) do
+          {:ok, unquote(repo_module).all(query)}
+        end
+      end
+    end
+  end
+
+  defp api_list_by_ids_funs(e, schema_module, repo_module, scope_mod) do
+    [
+      api_list_by_ids_instrumented_fun(e),
+      api_list_by_ids_internal_fun(e, schema_module, repo_module, scope_mod)
+    ]
+  end
+
+  defp api_list_by_ids_instrumented_fun(e) do
+    fun_name = :list_by_ids
+    internal_fun_name = internal_fun_name(:list_by_ids)
+
+    quote do
+      def unquote(fun_name)(ids, context \\ %{}) do
+        meta = %{entity: unquote(e[:name]), action: unquote(fun_name)}
+
+        :telemetry.span([:graphism, :api], meta, fn ->
+          {unquote(internal_fun_name)(ids, context), meta}
+        end)
+      end
+    end
+  end
+
+  defp api_list_by_ids_internal_fun(e, schema_module, repo_module, scope_mod) do
+    fun_name = :list_by_ids
+    internal_fun_name = internal_fun_name(:list_by_ids)
+
+    quote do
+      defp unquote(internal_fun_name)(ids, context) do
+        query =
+          from(unquote(Ast.var(e)) in unquote(schema_module), as: unquote(e[:name]))
+          |> where([q], q.id in ^ids)
 
         with unquote(scoped_query_invocation(scope_mod, fun_name)),
              {:ok, query} <- maybe_paginate(query, context),
@@ -294,15 +336,21 @@ defmodule Graphism.Api do
     end
   end
 
-  defp api_list_by_parent_internal_fun(rel, _e, schema_module, repo_module, scope_mod) do
+  defp api_list_by_parent_internal_fun(rel, e, schema_module, repo_module, scope_mod) do
     fun_name = String.to_atom("list_by_#{rel[:name]}")
     internal_fun_name = internal_fun_name(fun_name)
 
     quote do
-      defp unquote(internal_fun_name)(id, context \\ %{}) do
+      defp unquote(internal_fun_name)(id, context \\ %{})
+
+      defp unquote(internal_fun_name)(id, context) when is_binary(id) do
+        unquote(internal_fun_name)([id], context)
+      end
+
+      defp unquote(internal_fun_name)(ids, context) when is_list(ids) do
         query =
-          from(unquote(Ast.var(rel)) in unquote(schema_module))
-          |> where([q], q.unquote(String.to_atom("#{rel[:name]}_id")) == ^id)
+          from(unquote(Ast.var(rel)) in unquote(schema_module), as: unquote(e[:name]))
+          |> where([q], q.unquote(String.to_atom("#{rel[:name]}_id")) in ^ids)
 
         with unquote(scoped_query_invocation(scope_mod, fun_name)),
              {:ok, query} <- maybe_paginate(query, context),
@@ -356,7 +404,7 @@ defmodule Graphism.Api do
 
     quote do
       defp unquote(internal_fun_name)(unquote_splicing(Ast.vars(args)), context) do
-        query = from(unquote(Ast.var(e)) in unquote(schema_module))
+        query = from(unquote(Ast.var(e)) in unquote(schema_module), as: unquote(e[:name]))
         unquote_splicing(filters)
 
         with unquote(scoped_query_invocation(scope_mod, fun_name)),
@@ -406,7 +454,7 @@ defmodule Graphism.Api do
 
     quote do
       defp unquote(internal_fun_name)(context \\ %{}) do
-        query = from(unquote(Ast.var(e)) in unquote(schema_module))
+        query = from(unquote(Ast.var(e)) in unquote(schema_module), as: unquote(e[:name]))
 
         with unquote(scoped_query_invocation(scope_mod, fun_name)) do
           {:ok, %{count: unquote(repo_module).aggregate(query, :count)}}
@@ -449,7 +497,7 @@ defmodule Graphism.Api do
     quote do
       defp unquote(internal_fun_name)(id, context) do
         query =
-          from(unquote(Ast.var(rel)) in unquote(schema_module))
+          from(unquote(Ast.var(rel)) in unquote(schema_module), as: unquote(e[:name]))
           |> where([q], q.unquote(column_name) == ^id)
 
         with unquote(scoped_query_invocation(scope_mod, fun_name)) do
@@ -502,7 +550,7 @@ defmodule Graphism.Api do
 
     quote do
       defp unquote(internal_fun_name)(unquote_splicing(Ast.vars(args)), context) do
-        query = from(unquote(Ast.var(e)) in unquote(schema_module))
+        query = from(unquote(Ast.var(e)) in unquote(schema_module), as: unquote(e[:name]))
         unquote_splicing(filters)
 
         with unquote(scoped_query_invocation(scope_mod, fun_name)) do

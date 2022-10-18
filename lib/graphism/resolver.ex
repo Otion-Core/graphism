@@ -10,7 +10,7 @@ defmodule Graphism.Resolver do
     resolver_funs =
       []
       |> with_resolver_pagination_fun()
-      |> with_resolver_scope_results_fun(hooks)
+      |> with_resolver_scope_results_fun(e, hooks)
       |> with_resolver_auth_funs(e, schema, hooks)
       |> with_resolver_inlined_relations_funs(e, schema, api_module)
       |> with_resolver_list_funs(e, schema, api_module, hooks)
@@ -44,11 +44,11 @@ defmodule Graphism.Resolver do
     ]
   end
 
-  defp with_resolver_scope_results_fun(funs, hooks) do
+  defp with_resolver_scope_results_fun(funs, e, hooks) do
     mod = Hooks.auth_module(hooks)
 
     fun =
-      if mod != nil do
+      if mod != nil && Entity.scope_results?(e) do
         quote do
           defp scope_results(items, context) do
             entity = context.graphism.entity

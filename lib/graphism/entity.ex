@@ -58,6 +58,7 @@ defmodule Graphism.Entity do
   def client_ids?(e), do: modifier?(e, :client_ids)
   def refetch?(e), do: modifier?(e, :refetch)
   def internal?(e), do: modifier?(e, :internal)
+  def scope_results?(e), do: modifier?(e, :scope_results)
 
   def id?(attr), do: attr[:name] == :id
   def computed?(field), do: modifier?(field, :computed)
@@ -297,6 +298,12 @@ defmodule Graphism.Entity do
     e
     |> relations()
     |> Enum.filter(fn rel -> rel[:kind] == :belongs_to end)
+  end
+
+  def child_relations(e) do
+    e
+    |> relations()
+    |> Enum.filter(fn rel -> rel[:kind] == :has_many end)
   end
 
   def hook!(hooks, kind, name) do
