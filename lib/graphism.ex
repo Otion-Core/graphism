@@ -39,7 +39,6 @@ defmodule Graphism do
 
     repo = opts[:repo]
     styles = opts[:styles] || [:graphql]
-    field_auth = Keyword.get(opts, :field_auth, true)
 
     if repo != nil do
       Module.register_attribute(__CALLER__.module, :repo,
@@ -66,8 +65,6 @@ defmodule Graphism do
               import_types(Absinthe.Type.Custom)
               import_types(Absinthe.Plug.Types)
               import_types(Graphism.Type.Graphql.Json)
-              @field_auth? unquote(field_auth)
-              @field_auth_middleware unquote(__CALLER__.module).FieldsAuth
               @middleware unquote(middleware)
 
               def context(ctx), do: Map.put(ctx, :loader, __MODULE__.Dataloader.new())
@@ -77,11 +74,7 @@ defmodule Graphism do
               end
 
               def middleware(middleware, _field, _object) do
-                if @field_auth? do
-                  middleware ++ [@field_auth_middleware, Graphism.ErrorMiddleware]
-                else
-                  middleware ++ [Graphism.ErrorMiddleware]
-                end
+                middleware ++ [Graphism.ErrorMiddleware]
               end
             end
           end
@@ -244,8 +237,6 @@ defmodule Graphism do
 
       graphql_modules =
         if Enum.member?(styles, :graphql) do
-          auth_hook = Graphism.Hooks.auth_module(hooks)
-
           graphql_resolver_modules =
             Enum.map(schema, fn e ->
               Graphism.Resolver.resolver_module(e, schema,
@@ -255,7 +246,6 @@ defmodule Graphism do
               )
             end)
 
-          graphql_fields_auth = Graphism.Graphql.fields_auth_module(schema, auth_hook)
           graphql_dataloader_middleware = Graphism.Dataloader.absinthe_middleware(caller: __CALLER__)
           graphql_enums = Graphism.Graphql.enums(enums)
           graphql_objects = Graphism.Graphql.objects(schema, caller: __CALLER__.module)
@@ -270,7 +260,6 @@ defmodule Graphism do
           [
             graphql_resolver_modules,
             graphql_dataloader_middleware,
-            graphql_fields_auth,
             graphql_enums,
             graphql_objects,
             graphql_self_resolver,
