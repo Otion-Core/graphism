@@ -568,6 +568,104 @@ iex> MyBlog.Schema.Comment.field_specs({:belongs_to, MyBlog.Schema.Post})
 [{:belongs_to, :blog, MyBlog.Schema.Post, :blog_id}]
 ```
 
+### Schema querying
+
+Since v0.9.0, Graphism provides with a high level `filter/1` query api that allows you to form complex Ecto queries with little
+code.
+
+Example:
+
+```elixir
+iex> Blog.Schema.filter({Blog.Schema.Comment, [:post, :slug], :eq, "P123"}
+
+#Ecto.Query<from c0 in Blog.Schema.Comment, as: :comment,
+ join: p1 in Blog.Schema.Post, as: :post, on: p1.id == c0.post_id,
+ where: p1.slug == ^"P123">
+```
+
+A more complex example:
+
+```elixir
+iex> Blog.Schema.filter({:intersect, [
+  {Blog.Schema.Comment, [:post, :slug], :eq, "P123"},
+  {Blog.Schema.Comment, [:"**", :user], :eq, Ecto.UUID.generate()},
+  {Blog.Schema.Comment, [[:post], [:"**", :user]], :eq, Ecto.UUID.generate()},
+  {:union, [
+    {Blog.Schema.Comment, [:post, :slug], :eq, "P098"},
+    {Blog.Schema.Comment, [:comment, :post, :slug], :eq, "P091"},
+    {Blog.Schema.Comment, [:"**", :user], :eq, Ecto.UUID.generate()}
+  ]}
+]})
+
+#Ecto.Query<from c0 in Blog.Schema.Comment, as: :comment,
+join: p1 in Blog.Schema.Post, as: :post, on: p1.id == c0.post_id,
+where: p1.slug == ^"P123",
+intersect: (from c0 in Blog.Schema.Comment,
+as: :comment,
+join: p1 in Blog.Schema.Post,
+as: :post,
+on: p1.id == c0.post_id,
+where: p1.user_id == ^"5ed1fb19-4f1b-4926-abe0-0a28fb42dadd"),
+intersect: (from c0 in Blog.Schema.Comment,
+as: :comment,
+where: c0.post_id == ^"5064fe2a-e392-4a2a-92d5-86c85befced7",
+union: (from c0 in Blog.Schema.Comment,
+as: :comment,
+join: p1 in Blog.Schema.Post,
+as: :post,
+on: p1.id == c0.post_id,
+where: p1.user_id == ^"5064fe2a-e392-4a2a-92d5-86c85befced7")),
+intersect: (from c0 in Blog.Schema.Comment,
+as: :comment,
+join: p1 in Blog.Schema.Post,
+as: :post,
+on: p1.id == c0.post_id,
+where: p1.slug == ^"P098",
+union: (from c0 in Blog.Schema.Comment,
+as: :comment,
+join: p1 in Blog.Schema.Post,
+as: :post,
+on: p1.id == c0.post_id,
+where: p1.slug == ^"P091"),
+union: (from c0 in Blog.Schema.Comment,
+as: :comment,
+join: p1 in Blog.Schema.Post,
+as: :post,
+on: p1.id == c0.post_id,
+where: p1.user_id == ^"f6dc2148-7012-4fde-820e-a2dd4699d122"))>
+```
+
+### Schema evaluation
+
+Similar to the query api, Graphism also provides with an `evaluate/2` api, that recursively resolves paths on a context.
+
+For example the expression:
+
+```elixir
+iex> user = %Blog.Schema.User{id: ...}
+iex> Blog.Schema.evaluate(user, [:posts, comments, :text])
+```
+
+would return all the comments' texts for the user found in the context.
+
+Relations are resolved lazily and cached.
+
+### Fuzzy comparisons
+
+In addition to the `query/1` and `evaluate/2` apis, the `compare/3` performs fuzzy comparions on data.
+
+The following comparators are supported:
+
+* `:eq`
+* `:neq`
+* `:lt`
+* `:lte`
+* `:gt`
+* `:gte`
+* `:in`
+* `:not_in`
+
+
 ### Json types
 
 Graphism allows you to define attributes of `json` type in order to store unstructured data as maps or arrays:

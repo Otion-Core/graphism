@@ -31,11 +31,11 @@ defmodule Graphism.Querying do
 
 
   ```elixir
-  q = Blog.Schema.filter({:all, [
+  q = Blog.Schema.filter({:intersect, [
     {Blog.Schema.Comment, [:post, :slug], :eq, "P123"},
     {Blog.Schema.Comment, [:"**", :user], :eq, Ecto.UUID.generate()},
     {Blog.Schema.Comment, [[:post], [:"**", :user]], :eq, Ecto.UUID.generate()},
-    {:first, [
+    {:union, [
       {Blog.Schema.Comment, [:post, :slug], :eq, "P098"},
       {Blog.Schema.Comment, [:comment, :post, :slug], :eq, "P091"},
       {Blog.Schema.Comment, [:"**", :user], :eq, Ecto.UUID.generate()}
@@ -99,7 +99,7 @@ defmodule Graphism.Querying do
     quote do
       import Ecto.Query
 
-      def filter({:all, filters}) when is_list(filters) do
+      def filter({:intersect, filters}) when is_list(filters) do
         filters
         |> Enum.reduce(nil, fn f, q ->
           f
@@ -108,7 +108,7 @@ defmodule Graphism.Querying do
         end)
       end
 
-      def filter({:first, filters}) when is_list(filters) do
+      def filter({:union, filters}) when is_list(filters) do
         filters
         |> Enum.reduce(nil, fn f, q ->
           f
