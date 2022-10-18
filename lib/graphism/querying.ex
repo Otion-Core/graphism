@@ -1,7 +1,9 @@
-defmodule Graphism.QueryBuilder do
+defmodule Graphism.Querying do
   @moduledoc """
   Generates convenience functions for powerful generation of complex queries.
+  """
 
+  @doc """
   For example, given the following schema:
 
   ```elixir
@@ -92,12 +94,8 @@ defmodule Graphism.QueryBuilder do
   SELECT c0."id", c0."text", c0."active", c0."post_id", c0."inserted_at", c0."updated_at" FROM "comments" AS c0 INNER JOIN "posts" AS p1 ON p1."id" = c0."post_id" WHERE (p1."slug" = $1) INTERSECT (SELECT c0."id", c0."text", c0."active", c0."post_id", c0."inserted_at", c0."updated_at" FROM "comments" AS c0 INNER JOIN "posts" AS p1 ON p1."id" = c0."post_id" WHERE (p1."user_id" = $2)) INTERSECT (SELECT c0."id", c0."text", c0."active", c0."post_id", c0."inserted_at", c0."updated_at" FROM "comments" AS c0 WHERE (c0."post_id" = $3) UNION (SELECT c0."id", c0."text", c0."active", c0."post_id", c0."inserted_at", c0."updated_at" FROM "comments" AS c0 INNER JOIN "posts" AS p1 ON p1."id" = c0."post_id" WHERE (p1."user_id" = $4))) INTERSECT (SELECT c0."id", c0."text", c0."active", c0."post_id", c0."inserted_at", c0."updated_at" FROM "comments" AS c0 INNER JOIN "posts" AS p1 ON p1."id" = c0."post_id" WHERE (p1."slug" = $5) UNION (SELECT c0."id", c0."text", c0."active", c0."post_id", c0."inserted_at", c0."updated_at" FROM "comments" AS c0 INNER JOIN "posts" AS p1 ON p1."id" = c0."post_id" WHERE (p1."slug" = $6)) UNION (SELECT c0."id", c0."text", c0."active", c0."post_id", c0."inserted_at", c0."updated_at" FROM "comments" AS c0 INNER JOIN "posts" AS p1 ON p1."id" = c0."post_id" WHERE (p1."user_id" = $7))) ["P123", "c03a7c37-5193-4555-a1a1-e8bac37ce825", "7928ce87-1f4c-4a42-aa31-29a66ba21dfb", "7928ce87-1f4c-4a42-aa31-29a66ba21dfb", "P098", "P091", "b48f5fb2-9c49-427f-a2ad-86d9c63c044a"]
   []
   ```
-
   """
-
-  def funs(opts) do
-    repo = Keyword.fetch!(opts, :repo)
-
+  def filter_fun do
     quote do
       import Ecto.Query
 
@@ -207,7 +205,25 @@ defmodule Graphism.QueryBuilder do
       defp combine(nil, prev, _), do: prev
       defp combine(q, prev, :union), do: Ecto.Query.union(prev, ^q)
       defp combine(q, prev, :intersect), do: Ecto.Query.intersect(prev, ^q)
+    end
+  end
 
+  @doc """
+  Generates an `evaluate/2` function that takes a map context, and an path, and returns the result of traversing the
+    context.
+
+  For example, the expression:
+
+  ```elixir
+  iex> Blog.Schema.evaluate(user, [:posts, comments, :text])
+  ```
+
+  would return all the comments' text for the user found in the context. Relations are resolved lazily and cached.
+  """
+  def evaluate_fun(opts) do
+    repo = Keyword.fetch!(opts, :repo)
+
+    quote do
       def evaluate(nil, _), do: nil
       def evaluate(value, []), do: value
 
@@ -298,6 +314,66 @@ defmodule Graphism.QueryBuilder do
 
       defp unloaded?(%{__struct__: Ecto.Association.NotLoaded}), do: true
       defp unloaded?(_), do: false
+    end
+  end
+
+  @doc """
+  Returns a `compare/3` function that takes two values and a comparator, and performs a fuzzy comparison according to
+    some predefined rules.
+
+  """
+  def compare_fun do
+    quote do
+      def compare(nil, nil, _), do: true
+      def compare(nil, _, _), do: false
+      def compare(v, v, :eq), do: true
+      def compare(%{id: id}, %{id: id}, :eq), do: true
+      def compare(%{id: id}, id, :eq), do: true
+      def compare(id, %{id: id}, :eq), do: true
+      def compare([], _, :eq), do: true
+      def compare(v1, v2, :eq) when is_list(v1), do: Enum.any?(v1, &compare(&1, v2, :eq))
+      def compare(_, _, :eq), do: false
+
+      def compare(v1, v2, :gt), do: v1 > v2
+      def compare(v1, v2, :gte), do: v1 >= v2
+      def compare(v1, v2, :lt), do: v1 < v2
+      def compare(v1, v2, :lte), do: v1 <= v2
+
+      def compare(v, values, :in) when is_list(v) and is_list(values) do
+        v = comparable(v)
+        values = comparable(values)
+
+        not Enum.empty?(v -- v -- values)
+      end
+
+      def compare(v, values, :in) when is_list(values) do
+        v = comparable(v)
+        values = comparable(values)
+
+        Enum.member?(values, v)
+      end
+
+      def compare(v, value, :in), do: compare(v, [value], :in)
+
+      def compare(v, values, :not_in) when is_list(v) and is_list(values) do
+        v = comparable(v)
+        values = comparable(values)
+
+        Enum.empty?(v -- v -- values)
+      end
+
+      def compare(v, values, :not_in) when is_list(values) do
+        v = comparable(v)
+        values = comparable(values)
+
+        !Enum.member?(values, v)
+      end
+
+      def compare(v, value, :not_in), do: compare(v, [value], :not_in)
+
+      defp comparable(values) when is_list(values), do: Enum.map(values, &comparable/1)
+      defp comparable(%{id: id}), do: %{id: id}
+      defp comparable(other), do: other
     end
   end
 end

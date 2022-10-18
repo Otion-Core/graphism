@@ -212,7 +212,9 @@ defmodule Graphism do
         end)
 
       dataloader_module = Graphism.Dataloader.dataloader_module(caller: __CALLER__)
-      query_builder_funs = Graphism.QueryBuilder.funs(repo: repo)
+      schema_filter_fun = Graphism.Querying.filter_fun()
+      schema_evaluate_fun = Graphism.Querying.evaluate_fun(repo: repo)
+      schema_compare_fun = Graphism.Querying.compare_fun()
 
       rest_modules =
         if Enum.member?(styles, :rest) do
@@ -282,7 +284,9 @@ defmodule Graphism do
           schema_modules,
           api_modules,
           dataloader_module,
-          query_builder_funs
+          schema_filter_fun,
+          schema_evaluate_fun,
+          schema_compare_fun
         ] ++ graphql_modules ++ rest_modules
       )
     end
