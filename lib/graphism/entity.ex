@@ -865,6 +865,42 @@ defmodule Graphism.Entity do
     end
   end
 
+  def with_action_policies(opts) do
+    case opts[:do] do
+      nil ->
+        opts
+
+      block ->
+        policies =
+          block
+          |> action_policies()
+          |> List.flatten()
+
+        Keyword.put(opts, :policies, policies)
+    end
+  end
+
+  defp action_policies({:__block__, _, block}) do
+    block
+    |> Enum.map(&action_policies/1)
+    |> Enum.reject(&is_nil/1)
+  end
+
+  defp action_policies({:policy, _, policy}), do: action_policy(policy)
+  defp action_policies(_), do: []
+
+  defp action_policy([policy, [for_role: role]]) do
+    [{role, policy}]
+  end
+
+  defp action_policy([[all: policies, for_role: role]]) do
+    [{role, all: policies}]
+  end
+
+  defp action_policy([[one: policies, for_role: role]]) do
+    [{role, one: policies}]
+  end
+
   def actions_from({:__block__, _, actions}, entity_name) do
     actions
     |> Enum.reduce([], fn action, acc ->
@@ -897,6 +933,8 @@ defmodule Graphism.Entity do
       |> with_action_args(entity_name)
       |> with_action_hook(:allow)
       |> with_action_hook(:scope)
+      |> with_action_policies()
+      |> Keyword.drop([:do])
 
     [name: name, opts: opts]
   end

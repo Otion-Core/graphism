@@ -9,7 +9,9 @@ defmodule Graphism do
 
   alias Graphism.{
     Api,
-    Entity
+    Entity,
+    Policy,
+    Role
   }
 
   require Logger
@@ -28,6 +30,16 @@ defmodule Graphism do
     )
 
     Module.register_attribute(__CALLER__.module, :schema,
+      accumulate: true,
+      persist: true
+    )
+
+    Module.register_attribute(__CALLER__.module, :policy,
+      accumulate: true,
+      persist: true
+    )
+
+    Module.register_attribute(__CALLER__.module, :role,
       accumulate: true,
       persist: true
     )
@@ -126,6 +138,16 @@ defmodule Graphism do
         |> Module.get_attribute(:schema)
         |> Kernel.++(schema_imports)
         |> Entity.resolve_schema()
+
+      _policies =
+        caller_module
+        |> Module.get_attribute(:policy)
+        |> index_by(:name)
+
+      _roles =
+        caller_module
+        |> Module.get_attribute(:role)
+        |> index_by(:name)
 
       data_imports =
         caller_module
@@ -292,6 +314,13 @@ defmodule Graphism do
     end
   end
 
+  defp index_by(items, key) do
+    items
+    |> Enum.reduce(%{}, fn item, acc ->
+      Map.put(acc, Map.fetch!(item, key), item)
+    end)
+  end
+
   defmacro import_schema({:__aliases__, _, module}) do
     Module.put_attribute(__CALLER__.module, :schema_imports, Module.concat(module))
   end
@@ -429,5 +458,26 @@ defmodule Graphism do
   end
 
   defmacro json(_name, _opts \\ []) do
+  end
+
+  defmacro policy(name, opts \\ [], do: block) do
+    policy =
+      block
+      |> Policy.from_block(opts)
+      |> Policy.with_name(name)
+
+    Module.put_attribute(__CALLER__.module, :policy, policy)
+  end
+
+  defmacro allow_if(_block) do
+  end
+
+  defmacro role(name, opts \\ [], do: block) do
+    role =
+      block
+      |> Role.from_block(opts)
+      |> Role.with_name(name)
+
+    Module.put_attribute(__CALLER__.module, :role, role)
   end
 end
