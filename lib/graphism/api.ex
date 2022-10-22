@@ -1,11 +1,10 @@
 defmodule Graphism.Api do
   @moduledoc "Generaes entity api modules"
 
-  alias Graphism.{Ast, Auth, Entity}
+  alias Graphism.{Ast, Entity}
 
-  def api_module(e, schema, hooks, opts) do
-    schema_module = e[:schema_module]
-    repo_module = opts[:repo]
+  def api_module(e, schema, repo_module, auth_module) do
+    schema_module = Keyword.fetch!(e, :schema_module)
 
     case Entity.virtual?(e) do
       false ->
@@ -15,14 +14,14 @@ defmodule Graphism.Api do
           |> with_query_preload_fun(e, schema)
           |> with_optional_query_pagination_fun(e, schema_module)
           |> with_query_scope_fun(e)
-          |> with_api_list_funs(e, schema_module, repo_module, hooks)
-          |> with_api_aggregate_funs(e, schema_module, repo_module, hooks)
+          |> with_api_list_funs(e, schema_module, repo_module, auth_module)
+          |> with_api_aggregate_funs(e, schema_module, repo_module, auth_module)
           |> with_api_read_funs(e, schema_module, repo_module, schema)
           |> with_api_create_fun(e, schema_module, repo_module, schema)
           |> with_api_batch_create_fun(e, schema_module, repo_module, schema)
           |> with_api_update_fun(e, schema_module, repo_module, schema)
           |> with_api_delete_fun(e, schema_module, repo_module, schema)
-          |> with_api_custom_funs(e, schema_module, repo_module, schema, hooks)
+          |> with_api_custom_funs(e, schema_module, repo_module, schema, auth_module)
           |> List.flatten()
 
         quote do
@@ -47,7 +46,7 @@ defmodule Graphism.Api do
 
         api_funs =
           []
-          |> with_api_custom_funs(e, schema_module, repo_module, schema, hooks)
+          |> with_api_custom_funs(e, schema_module, repo_module, schema, auth_module)
           |> List.flatten()
 
         quote do
@@ -219,14 +218,12 @@ defmodule Graphism.Api do
     ]
   end
 
-  defp with_api_list_funs(funs, e, schema_module, repo_module, hooks) do
-    scope_mod = Auth.module(hooks)
-
+  defp with_api_list_funs(funs, e, schema_module, repo_module, auth_module) do
     List.flatten([
-      api_list_all_funs(e, schema_module, repo_module, scope_mod),
-      api_list_by_ids_funs(e, schema_module, repo_module, scope_mod),
-      api_list_by_parent_funs(e, schema_module, repo_module, scope_mod),
-      api_list_by_non_unique_key_funs(e, schema_module, repo_module, scope_mod)
+      api_list_all_funs(e, schema_module, repo_module, auth_module),
+      api_list_by_ids_funs(e, schema_module, repo_module, auth_module),
+      api_list_by_parent_funs(e, schema_module, repo_module, auth_module),
+      api_list_by_non_unique_key_funs(e, schema_module, repo_module, auth_module)
     ]) ++ funs
   end
 
@@ -416,13 +413,11 @@ defmodule Graphism.Api do
     end
   end
 
-  defp with_api_aggregate_funs(funs, e, schema_module, repo_module, hooks) do
-    scope_mod = Auth.module(hooks)
-
+  defp with_api_aggregate_funs(funs, e, schema_module, repo_module, auth_module) do
     List.flatten([
-      api_aggregate_all_funs(e, schema_module, repo_module, scope_mod),
-      api_aggregate_by_parent_funs(e, schema_module, repo_module, scope_mod),
-      api_aggregate_by_non_unique_key_funs(e, schema_module, repo_module, scope_mod)
+      api_aggregate_all_funs(e, schema_module, repo_module, auth_module),
+      api_aggregate_by_parent_funs(e, schema_module, repo_module, auth_module),
+      api_aggregate_by_non_unique_key_funs(e, schema_module, repo_module, auth_module)
     ]) ++ funs
   end
 
@@ -736,12 +731,12 @@ defmodule Graphism.Api do
     [fun | funs]
   end
 
-  defp with_api_custom_funs(funs, e, schema_module, repo_module, schema, hooks) do
+  defp with_api_custom_funs(funs, e, schema_module, repo_module, schema, auth_module) do
     custom_action_funs =
       e
       |> Entity.custom_mutations()
-      |> Enum.map(fn {action, opts} ->
-        api_custom_action_fun(e, action, opts, schema_module, repo_module, schema, hooks)
+      |> Enum.map(fn {action, action_opts} ->
+        api_custom_action_fun(e, action, action_opts)
       end)
 
     custom_list_funs =
@@ -749,15 +744,15 @@ defmodule Graphism.Api do
       |> Entity.custom_queries()
       |> Enum.flat_map(fn {action, opts} ->
         [
-          api_custom_list_fun(e, action, opts, schema_module, repo_module, schema, hooks),
-          api_custom_list_aggregate_fun(e, action, opts, schema_module, repo_module, schema, hooks)
+          api_custom_list_fun(e, action, opts, schema_module, repo_module, schema, auth_module),
+          api_custom_list_aggregate_fun(e, action, opts, schema_module, repo_module, schema, auth_module)
         ]
       end)
 
     funs ++ custom_action_funs ++ custom_list_funs
   end
 
-  defp api_custom_action_fun(e, action, opts, _schema_module, _repo_module, _schema, _hooks) do
+  defp api_custom_action_fun(e, action, opts) do
     using_mod = opts[:using]
 
     unless using_mod do
@@ -771,9 +766,8 @@ defmodule Graphism.Api do
     end
   end
 
-  defp api_custom_list_fun(e, action, opts, _schema_module, repo_module, _schema, hooks) do
+  defp api_custom_list_fun(e, action, opts, _schema_module, repo_module, _schema, auth_module) do
     using_mod = opts[:using]
-    scope_mod = Auth.module(hooks)
 
     unless using_mod do
       raise "custom action #{action} of #{e[:name]} does not define a :using option"
@@ -782,7 +776,7 @@ defmodule Graphism.Api do
     quote do
       def unquote(action)(args, context \\ %{}) do
         with {:ok, query} <- unquote(using_mod).execute(args, context),
-             unquote(scoped_query_invocation(scope_mod, action)),
+             unquote(scoped_query_invocation(auth_module, action)),
              {:ok, query} <- maybe_paginate(query, context) do
           {:ok, unquote(repo_module).all(query)}
         end
@@ -790,10 +784,9 @@ defmodule Graphism.Api do
     end
   end
 
-  defp api_custom_list_aggregate_fun(e, action, opts, _schema_module, repo_module, _schema, hooks) do
+  defp api_custom_list_aggregate_fun(e, action, opts, _schema_module, repo_module, _schema, auth_module) do
     fun_name = String.to_atom("aggregate_#{action}")
     using_mod = opts[:using]
-    scope_mod = Auth.module(hooks)
 
     unless using_mod do
       raise "custom action #{action} of #{e[:name]} does not define a :using option"
@@ -802,7 +795,7 @@ defmodule Graphism.Api do
     quote do
       def unquote(fun_name)(args, context \\ %{}) do
         with {:ok, query} <- unquote(using_mod).execute(args, context),
-             unquote(scoped_query_invocation(scope_mod, action)) do
+             unquote(scoped_query_invocation(auth_module, action)) do
           {:ok, %{count: unquote(repo_module).aggregate(query, :count)}}
         end
       end

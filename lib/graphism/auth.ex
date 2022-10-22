@@ -1,9 +1,10 @@
 defmodule Graphism.Auth do
   @moduledoc "Authorization module definition"
 
-  alias Graphism.Hooks
-
-  def module(hooks) do
-    Hooks.find(hooks, :allow, :default)
+  def auth_funs do
+    quote do
+      def allow?(_args, _context), do: true
+      def scope(q, _context), do: q
+    end
   end
 end

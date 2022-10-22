@@ -1,11 +1,9 @@
 defmodule Graphism.Rest do
   @moduledoc "Generates a REST api"
 
-  alias Graphism.{Ast, Auth, Entity, Openapi, Route}
+  alias Graphism.{Ast, Entity, Openapi, Route}
 
-  def helper_modules(_schema, hooks, _opts) do
-    auth = Auth.module(hooks)
-
+  def helper_modules(auth_module) do
     quote do
       defmodule RouterHelper do
         import Plug.Conn
@@ -100,23 +98,13 @@ defmodule Graphism.Rest do
           Map.put(assigns, assigns.graphism.entity, item)
         end
 
-        unquote(
-          if auth != nil do
-            quote do
-              def allowed?(assigns, args \\ nil) do
-                if unquote(auth).allow?(args, assigns) do
-                  :ok
-                else
-                  {:error, :unauthorized}
-                end
-              end
-            end
+        def allowed?(assigns, args \\ nil) do
+          if unquote(auth_module).allow?(args, assigns) do
+            :ok
           else
-            quote do
-              def allowed?(_assigns, _args \\ nil), do: :ok
-            end
+            {:error, :unauthorized}
           end
-        )
+        end
 
         defp cast(nil, _, :invalid), do: {:error, :invalid}
         defp cast(nil, _, :continue), do: {:error, :continue}
@@ -199,8 +187,8 @@ defmodule Graphism.Rest do
     end
   end
 
-  def handler_modules(schema, hooks, opts) do
-    opts = Keyword.merge(opts, schema: schema, hooks: hooks)
+  def handler_modules(schema, repo_module, opts) do
+    opts = Keyword.merge(opts, schema: schema, repo: repo_module)
 
     Enum.flat_map(schema, fn e ->
       standard_actions_handler_modules(e, opts) ++

@@ -220,9 +220,7 @@ defmodule Graphism.Querying do
 
   would return all the comments' text for the user found in the context. Relations are resolved lazily and cached.
   """
-  def evaluate_fun(opts) do
-    repo = Keyword.fetch!(opts, :repo)
-
+  def evaluate_fun(repo) do
     quote do
       def evaluate(nil, _), do: nil
       def evaluate(value, []), do: value
