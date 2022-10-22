@@ -1,10 +1,10 @@
 defmodule Graphism.Rest do
   @moduledoc "Generates a REST api"
 
-  alias Graphism.{Ast, Entity, Hooks, Openapi, Route}
+  alias Graphism.{Ast, Auth, Entity, Openapi, Route}
 
   def helper_modules(_schema, hooks, _opts) do
-    auth = Hooks.auth_module(hooks)
+    auth = Auth.module(hooks)
 
     quote do
       defmodule RouterHelper do
@@ -331,7 +331,8 @@ defmodule Graphism.Rest do
                {:ok, id} <- cast_param(conn, "id", :id),
                {:ok, _} <- unquote(e[:api_module]).get_by_id(id),
                {:ok, conn} <- with_pagination(conn),
-               {:ok, items} <- unquote(target[:api_module]).unquote(api_fun_name)(id, conn.assigns) do
+               {:ok, items} <-
+                 unquote(target[:api_module]).unquote(api_fun_name)(id, conn.assigns) do
             send_json(conn, items)
           else
             {:error, reason} ->
@@ -361,7 +362,8 @@ defmodule Graphism.Rest do
           with :ok <- allowed?(conn.assigns),
                {:ok, id} <- cast_param(conn, "id", :id),
                {:ok, _} <- unquote(e[:api_module]).get_by_id(id),
-               {:ok, result} <- unquote(target[:api_module]).unquote(api_fun_name)(id, conn.assigns) do
+               {:ok, result} <-
+                 unquote(target[:api_module]).unquote(api_fun_name)(id, conn.assigns) do
             send_json(conn, result)
           else
             {:error, reason} ->
@@ -392,7 +394,10 @@ defmodule Graphism.Rest do
                unquote_splicing(field_vars),
                {:ok, conn} <- with_pagination(conn),
                {:ok, items} <-
-                 unquote(e[:api_module]).unquote(api_fun_name)(unquote_splicing(field_var_names), conn.assigns) do
+                 unquote(e[:api_module]).unquote(api_fun_name)(
+                   unquote_splicing(field_var_names),
+                   conn.assigns
+                 ) do
             send_json(conn, items)
           else
             {:error, reason} ->
@@ -422,7 +427,10 @@ defmodule Graphism.Rest do
           with :ok <- allowed?(conn.assigns),
                unquote_splicing(field_vars),
                {:ok, result} <-
-                 unquote(e[:api_module]).unquote(api_fun_name)(unquote_splicing(field_var_names), conn.assigns) do
+                 unquote(e[:api_module]).unquote(api_fun_name)(
+                   unquote_splicing(field_var_names),
+                   conn.assigns
+                 ) do
             send_json(conn, result)
           else
             {:error, reason} ->
@@ -592,7 +600,9 @@ defmodule Graphism.Rest do
 
     quote do
       {:ok, args} <-
-        conn |> cast_param(unquote(to_string(name)), unquote(kind), unquote(default)) |> as(unquote(name), args)
+        conn
+        |> cast_param(unquote(to_string(name)), unquote(kind), unquote(default))
+        |> as(unquote(name), args)
     end
   end
 
@@ -622,7 +632,12 @@ defmodule Graphism.Rest do
 
           quote do
             {:ok, unquote(Ast.var(name))} <-
-              lookup(conn, unquote(to_string(name)), unquote(target[:api_module]), unquote(default))
+              lookup(
+                conn,
+                unquote(to_string(name)),
+                unquote(target[:api_module]),
+                unquote(default)
+              )
           end
 
         :update ->
@@ -662,7 +677,11 @@ defmodule Graphism.Rest do
 
       quote do
         {:ok, unquote(Ast.var(name))} <-
-          lookup_relation(unquote(api_module), unquote(Ast.var(parent_rel_name)), unquote(ancestor_rel_name))
+          lookup_relation(
+            unquote(api_module),
+            unquote(Ast.var(parent_rel_name)),
+            unquote(ancestor_rel_name)
+          )
       end
     end)
   end
@@ -705,7 +724,10 @@ defmodule Graphism.Rest do
           with unquote_splicing(args),
                :ok <- allowed?(conn.assigns, args),
                {:ok, item} <-
-                 unquote(e[:api_module]).create(unquote_splicing(handler_parent_arg_vars(e)), args) do
+                 unquote(e[:api_module]).create(
+                   unquote_splicing(handler_parent_arg_vars(e)),
+                   args
+                 ) do
             send_json(conn, item, 201)
           else
             {:error, reason} ->
@@ -724,12 +746,17 @@ defmodule Graphism.Rest do
     body =
       quote do
         def handle(conn, _opts) do
-          with {:ok, unquote(Ast.var(e))} <- lookup(conn, "id", unquote(e[:api_module]), :required),
+          with {:ok, unquote(Ast.var(e))} <-
+                 lookup(conn, "id", unquote(e[:api_module]), :required),
                args <- %{},
                unquote_splicing(args),
                :ok <- conn.assigns |> with_item(unquote(Ast.var(e))) |> allowed?(args),
                {:ok, unquote(Ast.var(e))} <-
-                 unquote(e[:api_module]).update(unquote_splicing(handler_parent_arg_vars(e)), unquote(Ast.var(e)), args) do
+                 unquote(e[:api_module]).update(
+                   unquote_splicing(handler_parent_arg_vars(e)),
+                   unquote(Ast.var(e)),
+                   args
+                 ) do
             send_json(conn, unquote(Ast.var(e)))
           else
             {:error, reason} ->
@@ -794,7 +821,8 @@ defmodule Graphism.Rest do
         {name, kind, []} ->
           [
             quote do
-              {:ok, unquote(Ast.var(name))} <- cast_param(conn, unquote(to_string(name)), unquote(kind))
+              {:ok, unquote(Ast.var(name))} <-
+                cast_param(conn, unquote(to_string(name)), unquote(kind))
             end
           ]
 
@@ -803,10 +831,12 @@ defmodule Graphism.Rest do
 
           [
             quote do
-              {:ok, unquote(Ast.var(name))} <- cast_param(conn, unquote(to_string(name)), unquote(kind))
+              {:ok, unquote(Ast.var(name))} <-
+                cast_param(conn, unquote(to_string(name)), unquote(kind))
             end,
             quote do
-              {:ok, unquote(Ast.var(name))} <- unquote(target[:api_module]).get_by_id(unquote(Ast.var(name)))
+              {:ok, unquote(Ast.var(name))} <-
+                unquote(target[:api_module]).get_by_id(unquote(Ast.var(name)))
             end
           ]
       end)

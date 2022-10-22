@@ -1,7 +1,7 @@
 defmodule Graphism.Resolver do
   @moduledoc "Produces Graphql resolver code"
 
-  alias Graphism.{Ast, Hooks, Entity}
+  alias Graphism.{Ast, Auth, Entity}
 
   def resolver_module(e, schema, opts) do
     api_module = e[:api_module]
@@ -45,7 +45,7 @@ defmodule Graphism.Resolver do
   end
 
   defp with_resolver_scope_results_fun(funs, e, hooks) do
-    mod = Hooks.auth_module(hooks)
+    mod = Auth.module(hooks)
 
     fun =
       if mod != nil && Entity.scope_results?(e) do
@@ -130,7 +130,7 @@ defmodule Graphism.Resolver do
   end
 
   defp resolver_list_all_auth_fun(e, _opts, _schema, hooks) do
-    mod = Hooks.auth_module(hooks)
+    mod = Auth.module(hooks)
 
     if mod != nil do
       quote do
@@ -146,7 +146,7 @@ defmodule Graphism.Resolver do
   end
 
   defp resolver_list_by_parent_auth_funs(e, _opts, _schema, hooks) do
-    mod = Hooks.auth_module(hooks)
+    mod = Auth.module(hooks)
 
     e
     |> Entity.parent_relations()
@@ -184,7 +184,7 @@ defmodule Graphism.Resolver do
   end
 
   defp resolver_auth_fun(action, opts, e, _schema, hooks) do
-    mod = Hooks.auth_module(hooks)
+    mod = Auth.module(hooks)
 
     fun_name = String.to_atom("should_#{action}?")
 

@@ -1,7 +1,7 @@
 defmodule Graphism.Api do
   @moduledoc "Generaes entity api modules"
 
-  alias Graphism.{Ast, Entity, Hooks}
+  alias Graphism.{Ast, Auth, Entity}
 
   def api_module(e, schema, hooks, opts) do
     schema_module = e[:schema_module]
@@ -220,7 +220,7 @@ defmodule Graphism.Api do
   end
 
   defp with_api_list_funs(funs, e, schema_module, repo_module, hooks) do
-    scope_mod = Hooks.auth_module(hooks)
+    scope_mod = Auth.module(hooks)
 
     List.flatten([
       api_list_all_funs(e, schema_module, repo_module, scope_mod),
@@ -417,7 +417,7 @@ defmodule Graphism.Api do
   end
 
   defp with_api_aggregate_funs(funs, e, schema_module, repo_module, hooks) do
-    scope_mod = Hooks.auth_module(hooks)
+    scope_mod = Auth.module(hooks)
 
     List.flatten([
       api_aggregate_all_funs(e, schema_module, repo_module, scope_mod),
@@ -773,7 +773,7 @@ defmodule Graphism.Api do
 
   defp api_custom_list_fun(e, action, opts, _schema_module, repo_module, _schema, hooks) do
     using_mod = opts[:using]
-    scope_mod = Hooks.auth_module(hooks)
+    scope_mod = Auth.module(hooks)
 
     unless using_mod do
       raise "custom action #{action} of #{e[:name]} does not define a :using option"
@@ -793,7 +793,7 @@ defmodule Graphism.Api do
   defp api_custom_list_aggregate_fun(e, action, opts, _schema_module, repo_module, _schema, hooks) do
     fun_name = String.to_atom("aggregate_#{action}")
     using_mod = opts[:using]
-    scope_mod = Hooks.auth_module(hooks)
+    scope_mod = Auth.module(hooks)
 
     unless using_mod do
       raise "custom action #{action} of #{e[:name]} does not define a :using option"
