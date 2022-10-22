@@ -103,7 +103,7 @@ defmodule Graphism do
 
     auth_module =
       caller_module
-      |> Module.get_attribute(:auth, __CALLER__.module)
+      |> Module.get_attribute(:auth, caller_module)
 
     styles =
       caller_module
@@ -114,30 +114,17 @@ defmodule Graphism do
       |> Module.get_attribute(:schema)
       |> Entity.resolve_schema()
 
-    _policies =
+    policies =
       caller_module
       |> Module.get_attribute(:policy)
       |> index_by(:name)
 
-    _roles =
+    roles =
       caller_module
       |> Module.get_attribute(:role)
       |> index_by(:name)
 
-    data_imports =
-      caller_module
-      |> Module.get_attribute(:schema_imports)
-      |> Enum.flat_map(fn mod ->
-        :attributes
-        |> mod.__info__()
-        |> Enum.filter(fn {name, _} -> name == :data end)
-        |> Enum.flat_map(fn {_, data} -> data end)
-      end)
-
-    data =
-      caller_module
-      |> Module.get_attribute(:data)
-      |> Keyword.merge(data_imports)
+    data = Module.get_attribute(caller_module, :data)
 
     enums =
       data
@@ -185,12 +172,12 @@ defmodule Graphism do
       schema
       |> Enum.reject(&Entity.virtual?(&1))
       |> Enum.map(fn e ->
-        Graphism.Schema.schema_module(e, schema, caller: __CALLER__)
+        Graphism.Schema.schema_module(e, schema)
       end)
 
     auth_funs =
-      if auth_module == __CALLER__.module do
-        Graphism.Auth.auth_funs()
+      if auth_module == caller_module do
+        Graphism.Auth.auth_funs(schema, policies, roles)
       else
         nil
       end
@@ -200,17 +187,17 @@ defmodule Graphism do
         Graphism.Api.api_module(e, schema, repo, auth_module)
       end)
 
-    dataloader_module = Graphism.Dataloader.dataloader_module(caller: __CALLER__)
+    dataloader_module = Graphism.Dataloader.dataloader_module(caller_module)
     schema_filter_fun = Graphism.Querying.filter_fun()
     schema_evaluate_fun = Graphism.Querying.evaluate_fun(repo)
     schema_compare_fun = Graphism.Querying.compare_fun()
 
     rest_modules =
       if Enum.member?(styles, :rest) do
-        openapi_module = Graphism.Openapi.spec_module(schema, caller: __CALLER__)
-        redocui_module = Graphism.Openapi.redocui_module(schema, caller: __CALLER__)
-        rest_router_module = Graphism.Rest.router_module(schema, caller: __CALLER__)
-        rest_handler_modules = Graphism.Rest.handler_modules(schema, repo, caller: __CALLER__)
+        openapi_module = Graphism.Openapi.spec_module(schema, caller_module)
+        redocui_module = Graphism.Openapi.redocui_module(caller_module)
+        rest_router_module = Graphism.Rest.router_module(schema, caller_module)
+        rest_handler_modules = Graphism.Rest.handler_modules(schema, repo, caller_module)
         rest_helper_modules = Graphism.Rest.helper_modules(auth_module)
         json_encoder_modules = Graphism.Encoder.json_modules(schema)
 
@@ -230,12 +217,12 @@ defmodule Graphism do
       if Enum.member?(styles, :graphql) do
         graphql_resolver_modules =
           Enum.map(schema, fn e ->
-            Graphism.Resolver.resolver_module(e, schema, auth_module, repo, caller: __CALLER__)
+            Graphism.Resolver.resolver_module(e, schema, auth_module, repo)
           end)
 
-        graphql_dataloader_middleware = Graphism.Dataloader.absinthe_middleware(caller: __CALLER__)
+        graphql_dataloader_middleware = Graphism.Dataloader.absinthe_middleware(caller_module)
         graphql_enums = Graphism.Graphql.enums(enums)
-        graphql_objects = Graphism.Graphql.objects(schema, caller: __CALLER__.module)
+        graphql_objects = Graphism.Graphql.objects(schema)
         graphql_self_resolver = Graphism.Graphql.self_resolver()
         graphql_aggregate_type = Graphism.Graphql.aggregate_type()
         graphql_entities_queries = Graphism.Graphql.entities_queries(schema)

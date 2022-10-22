@@ -146,11 +146,9 @@ defmodule Graphism.Rest do
     end
   end
 
-  def router_module(schema, opts) do
-    caller = Keyword.fetch!(opts, :caller)
-
+  def router_module(schema, caller_module) do
     telemetry_event_prefix =
-      caller.module
+      caller_module
       |> to_string()
       |> String.downcase()
       |> String.replace("elixir", "")
@@ -178,7 +176,7 @@ defmodule Graphism.Rest do
 
         unquote_splicing(routes(schema))
 
-        get("/openapi.json", to: unquote(Openapi.module_name(opts)))
+        get("/openapi.json", to: unquote(Openapi.module_name(caller_module)))
 
         match _ do
           send_json(unquote(Ast.var(:conn)), %{reason: :no_route}, 404)
@@ -187,8 +185,8 @@ defmodule Graphism.Rest do
     end
   end
 
-  def handler_modules(schema, repo_module, opts) do
-    opts = Keyword.merge(opts, schema: schema, repo: repo_module)
+  def handler_modules(schema, repo_module, caller_module) do
+    opts = [caller_module: caller_module, schema: schema, repo: repo_module]
 
     Enum.flat_map(schema, fn e ->
       standard_actions_handler_modules(e, opts) ++

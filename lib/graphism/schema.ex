@@ -14,7 +14,7 @@ defmodule Graphism.Schema do
     end)
   end
 
-  def schema_module(e, schema, _opts) do
+  def schema_module(e, schema) do
     indices = Migrations.indices_from_attributes(e) ++ Migrations.indices_from_keys(e)
     stored_attributes = Enum.reject(e[:attributes], fn attr -> attr[:name] == :id or Entity.virtual?(attr) end)
     scope_columns = Enum.map(e[:opts][:scope] || [], fn col -> String.to_atom("#{col}_id") end)

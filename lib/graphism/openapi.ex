@@ -3,14 +3,12 @@ defmodule Graphism.Openapi do
 
   alias Graphism.{Entity, Route}
 
-  def module_name(opts) do
-    caller = Keyword.fetch!(opts, :caller)
-
-    Module.concat([caller.module, OpenApi])
+  def module_name(caller_module, suffix \\ OpenApi) do
+    Module.concat([caller_module, suffix])
   end
 
-  def spec_module(schema, opts) do
-    module_name = module_name(opts)
+  def spec_module(schema, caller_module) do
+    module_name = module_name(caller_module)
     openapi = openapi(schema)
 
     quote do
@@ -31,9 +29,8 @@ defmodule Graphism.Openapi do
     end
   end
 
-  def redocui_module(_schema, opts) do
-    caller = Keyword.fetch!(opts, :caller)
-    module_name = Module.concat([caller.module, RedocUI])
+  def redocui_module(caller_module) do
+    module_name = module_name(caller_module, RedocUI)
 
     quote do
       defmodule unquote(module_name) do

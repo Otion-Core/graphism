@@ -3,10 +3,8 @@ defmodule Graphism.Dataloader do
 
   alias Graphism.Entity
 
-  def dataloader_module(opts) do
-    caller = Keyword.fetch!(opts, :caller)
-
-    module_name = Module.concat([caller.module, Dataloader])
+  def dataloader_module(caller_module) do
+    module_name = Module.concat([caller_module, Dataloader])
 
     quote do
       defmodule unquote(module_name) do
@@ -136,9 +134,8 @@ defmodule Graphism.Dataloader do
     end
   end
 
-  def absinthe_middleware(opts) do
-    caller = Keyword.fetch!(opts, :caller)
-    dataloader = Module.concat([caller.module, Dataloader])
+  def absinthe_middleware(caller_module) do
+    dataloader = Module.concat([caller_module, Dataloader])
     module_name = Module.concat([dataloader, Absinthe])
 
     quote do

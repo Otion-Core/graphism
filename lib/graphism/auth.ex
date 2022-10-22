@@ -1,7 +1,7 @@
 defmodule Graphism.Auth do
   @moduledoc "Authorization module definition"
 
-  def auth_funs do
+  def auth_funs(_schema, _policies, _roles) do
     quote do
       def allow?(_args, _context), do: true
       def scope(q, _context), do: q
