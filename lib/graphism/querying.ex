@@ -294,6 +294,12 @@ defmodule Graphism.Querying do
         end
       end
 
+      def evaluate(map, [field | rest]) when is_map(map) do
+        map
+        |> Map.get(field)
+        |> evaluate(rest)
+      end
+
       defp relation(%{__struct__: schema, id: id} = context, field) do
         with rel when rel != nil <- Map.get(context, field) do
           if unloaded?(rel) do

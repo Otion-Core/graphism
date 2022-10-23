@@ -9,8 +9,7 @@ defmodule Graphism do
 
   alias Graphism.{
     Entity,
-    Policy,
-    Role
+    Policy
   }
 
   require Logger
@@ -38,7 +37,7 @@ defmodule Graphism do
     )
 
     Module.register_attribute(__CALLER__.module, :role,
-      accumulate: true,
+      accumulate: false,
       persist: true
     )
 
@@ -119,10 +118,7 @@ defmodule Graphism do
       |> Module.get_attribute(:policy)
       |> index_by(:name)
 
-    roles =
-      caller_module
-      |> Module.get_attribute(:role)
-      |> index_by(:name)
+    role = Module.get_attribute(caller_module, :role)
 
     data = Module.get_attribute(caller_module, :data)
 
@@ -177,7 +173,7 @@ defmodule Graphism do
 
     auth_funs =
       if auth_module == caller_module do
-        Graphism.Auth.auth_funs(schema, policies, roles)
+        Graphism.Auth.auth_funs(schema, policies, role)
       else
         nil
       end
@@ -415,12 +411,7 @@ defmodule Graphism do
   defmacro allow_if(_block) do
   end
 
-  defmacro role(name, opts \\ [], do: block) do
-    role =
-      block
-      |> Role.from_block(opts)
-      |> Role.with_name(name)
-
-    Module.put_attribute(__CALLER__.module, :role, role)
+  defmacro role(expr) do
+    Module.put_attribute(__CALLER__.module, :role, expr)
   end
 end
