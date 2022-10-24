@@ -54,6 +54,16 @@ defmodule Graphism.Entity do
     e[:actions][action] || e[:custom_actions][action]
   end
 
+  def actions_of_other_kind(e, kind) do
+    Enum.reject(e[:actions], &action_of_kind?(&1, kind))
+  end
+
+  def actions_of_kind(e, kind) do
+    Enum.filter(e[:actions], &action_of_kind?(&1, kind))
+  end
+
+  defp action_of_kind?({_, opts}, kind), do: opts[:kind] == kind
+
   def virtual?(e), do: modifier?(e, :virtual)
   def client_ids?(e), do: modifier?(e, :client_ids)
   def refetch?(e), do: modifier?(e, :refetch)
