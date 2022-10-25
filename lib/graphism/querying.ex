@@ -296,10 +296,10 @@ defmodule Graphism.Querying do
         end
       end
 
-      defp relation(%{__struct__: schema} = context, field) do
+      defp relation(%{__struct__: schema, id: id} = context, field) do
         with rel when rel != nil <- Map.get(context, field) do
           if unloaded?(rel) do
-            key = {schema.entity(), field}
+            key = {id, field}
 
             with nil <- Process.get(key) do
               rel = context |> unquote(repo).preload(field) |> Map.get(field)
