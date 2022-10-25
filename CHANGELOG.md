@@ -5,6 +5,7 @@
 * Drop tables after indices - [#130](https://github.com/Gravity-Core/graphism/pull/130)
 * List arguments in custom actions - [#128](https://github.com/Gravity-Core/graphism/pull/128)
 * New dataloader, querying, evaluate and compare apis - [#127](https://github.com/Gravity-Core/graphism/pull/127)
+* Cache relations properly - [#132](https://github.com/Gravity-Core/graphism/pull/132)
 
 ## 0.8.3 (September 6th, 2022)
 
@@ -40,7 +41,7 @@
 
 ## 0.7.0 (July 19th, 2022)
 
-* Split code into smaller modules - [#111](https://github.com/Gravity-Core/graphism/pull/111) 
+* Split code into smaller modules - [#111](https://github.com/Gravity-Core/graphism/pull/111)
 * Fix index creation order - [#110](https://github.com/Gravity-Core/graphism/pull/110)
 * Custom aggregations - [#109](https://github.com/Gravity-Core/graphism/pull/109)
 * Relation telemetry - [#108](https://github.com/Gravity-Core/graphism/pull/108)
