@@ -288,10 +288,16 @@ defmodule Graphism.Schema do
                 parent_binding = Keyword.get(opts, :parent, unquote(rel[:name]))
                 child_binding = Keyword.get(opts, :child, unquote(e[:name]))
 
-                join(q, :inner, [{^child_binding, child}], parent in unquote(target_schema),
-                  as: ^parent_binding,
-                  on: parent.id == child.unquote(column_name)
-                )
+                if has_named_binding?(q, parent_binding) do
+                  join(q, :inner, [{^child_binding, child}], parent in unquote(target_schema),
+                    on: parent.id == child.unquote(column_name)
+                  )
+                else
+                  join(q, :inner, [{^child_binding, child}], parent in unquote(target_schema),
+                    as: ^parent_binding,
+                    on: parent.id == child.unquote(column_name)
+                  )
+                end
               end
             end
           end)
@@ -311,10 +317,16 @@ defmodule Graphism.Schema do
                 parent_binding = Keyword.get(opts, :parent, unquote(inverse_rel[:name]))
                 child_binding = Keyword.get(opts, :child, unquote(rel[:name]))
 
-                join(q, :inner, [{^parent_binding, parent}], child in unquote(target_schema),
-                  as: ^child_binding,
-                  on: parent.id == child.unquote(column_name)
-                )
+                if has_named_binding?(q, child_binding) do
+                  join(q, :inner, [{^parent_binding, parent}], child in unquote(target_schema),
+                    on: parent.id == child.unquote(column_name)
+                  )
+                else
+                  join(q, :inner, [{^parent_binding, parent}], child in unquote(target_schema),
+                    as: ^child_binding,
+                    on: parent.id == child.unquote(column_name)
+                  )
+                end
               end
             end
           end)
