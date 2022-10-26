@@ -6,6 +6,7 @@
 * List arguments in custom actions - [#128](https://github.com/Gravity-Core/graphism/pull/128)
 * New dataloader, querying, evaluate and compare apis - [#127](https://github.com/Gravity-Core/graphism/pull/127)
 * Cache relations properly - [#132](https://github.com/Gravity-Core/graphism/pull/132)
+* Safer query aliasing - [#133](https://github.com/Gravity-Core/graphism/pull/133)
 
 ## 0.8.3 (September 6th, 2022)
 
