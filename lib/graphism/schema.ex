@@ -402,6 +402,10 @@ defmodule Graphism.Schema do
           end)
         )
 
+        defp do_filter(q, column_name, :neq, nil, binding) do
+          where(q, [{^binding, e}], not is_nil(field(e, ^column_name)))
+        end
+
         defp do_filter(q, column_name, _, nil, binding) do
           where(q, [{^binding, e}], is_nil(field(e, ^column_name)))
         end
