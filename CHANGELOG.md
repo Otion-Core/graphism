@@ -8,6 +8,7 @@
 * Cache relations properly - [#132](https://github.com/Gravity-Core/graphism/pull/132)
 * Safer query aliasing - [#133](https://github.com/Gravity-Core/graphism/pull/133)
 * Not nil schema filter - [#134](https://github.com/Gravity-Core/graphism/pull/134)
+* Added schema `inverse_relation/1` - [#135](https://github.com/Gravity-Core/graphism/pull/135)
 
 ## 0.8.3 (September 6th, 2022)
 

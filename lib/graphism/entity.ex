@@ -124,25 +124,35 @@ defmodule Graphism.Entity do
   end
 
   def inverse_relation!(schema, e, name) do
+    inverse_rel = inverse_relation(schema, e, name)
+
+    unless inverse_rel do
+      rel = relation!(e, name)
+      target = find_entity!(schema, rel[:target])
+
+      raise """
+      Could not find inverse for #{inspect(rel[:kind])} relation #{inspect(rel[:name])} of #{inspect(e[:name])} in
+      entity #{inspect(target[:name])}
+      """
+    end
+
+    inverse_rel
+  end
+
+  def inverse_relation(schema, e, name) do
     rel = relation!(e, name)
     target = find_entity!(schema, rel[:target])
 
     case rel[:kind] do
       :has_many ->
-        inverse_rels = Enum.filter(target[:relations], fn inv -> inv[:kind] == :belongs_to end)
-        inverse_rel = Enum.find(inverse_rels, fn inv -> inv[:target] == e[:name] end)
-
-        unless inverse_rel do
-          raise """
-            Could not find inverse for :has_many relation #{rel[:name]} of #{e[:name]} in
-            #{inspect(inverse_rels)} of #{target[:name]}
-          """
-        end
-
-        inverse_rel
+        target
+        |> parent_relations()
+        |> Enum.find(fn rel -> rel[:target] == e[:name] end)
 
       :belongs_to ->
-        raise "Inverse for belongs_to -> has_many not implemented yet"
+        target
+        |> child_relations()
+        |> Enum.find(fn rel -> rel[:target] == e[:name] end)
     end
   end
 
