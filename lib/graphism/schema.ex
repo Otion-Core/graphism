@@ -177,6 +177,8 @@ defmodule Graphism.Schema do
           |> List.first() || []
         end
 
+        unquote_splicing(inverse_relation_ast(e, schema))
+
         def changeset(e, attrs) do
           changes =
             e
@@ -605,5 +607,27 @@ defmodule Graphism.Schema do
         def paths_to(unquote(attr[:name])), do: [[unquote(attr[:name])]]
       end
     end)
+  end
+
+  defp inverse_relation_ast(e, schema) do
+    for rel <- Entity.relations(e) do
+      with inverse when inverse != nil <- Entity.inverse_relation(schema, e, rel[:name]) do
+        target = Entity.find_entity!(schema, rel[:target])
+        schema_module = Keyword.fetch!(target, :schema_module)
+
+        quote do
+          def inverse_relation(unquote(rel[:name])) do
+            unquote(schema_module).field_spec(unquote(inverse[:name]))
+          end
+        end
+      end
+    end ++
+      [
+        quote do
+          def inverse_relation(_) do
+            {:error, :unknown}
+          end
+        end
+      ]
   end
 end
