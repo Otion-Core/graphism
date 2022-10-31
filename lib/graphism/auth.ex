@@ -30,7 +30,7 @@ defmodule Graphism.Auth do
   end
 
   defp non_list_actions_allow_funs(schema, policies) do
-    for e <- schema, {action, opts} <- Entity.actions_of_other_kind(e, :list) do
+    for e <- schema, {action, opts} <- Entity.non_list_actions(e) do
       case opts[:policies] do
         [_ | _] = action_policies ->
           action_policies = resolve_policies(action_policies, policies, e[:name], action)
@@ -53,7 +53,7 @@ defmodule Graphism.Auth do
   end
 
   defp list_actions_allow_funs(schema, policies) do
-    for e <- schema, {action, opts} <- Entity.actions_of_kind(e, :list) do
+    for e <- schema, {action, opts} <- Entity.list_actions(e) do
       case opts[:policies] do
         [_ | _] = action_policies ->
           action_policies = resolve_policies(action_policies, policies, e[:name], action)
