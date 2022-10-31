@@ -3,98 +3,6 @@ defmodule Graphism.Querying do
   Generates convenience functions for powerful generation of complex queries.
   """
 
-  @doc """
-  For example, given the following schema:
-
-  ```elixir
-  entity :user do
-    unique(string(:name))
-    boolean(:active, default: true)
-    has_many(:posts)
-  end
-
-  entity :post do
-    unique(string(:slug))
-    boolean(:active, default: true)
-    belongs_to(:user)
-    has_many(:comments)
-  end
-
-  entity :comment do
-    string(:text)
-    boolean(:active, default: true)
-    belongs_to(:post)
-  end
-  ```
-
-  the following abstract query:
-
-
-  ```elixir
-  q = Blog.Schema.filter({:intersect, [
-    {Blog.Schema.Comment, [:post, :slug], :eq, "P123"},
-    {Blog.Schema.Comment, [:"**", :user], :eq, Ecto.UUID.generate()},
-    {Blog.Schema.Comment, [[:post], [:"**", :user]], :eq, Ecto.UUID.generate()},
-    {:union, [
-      {Blog.Schema.Comment, [:post, :slug], :eq, "P098"},
-      {Blog.Schema.Comment, [:comment, :post, :slug], :eq, "P091"},
-      {Blog.Schema.Comment, [:"**", :user], :eq, Ecto.UUID.generate()}
-    ]}
-  ]})
-  ```
-
-  translates into:
-
-
-  ```elixir
-  #Ecto.Query<from c0 in Blog.Schema.Comment, as: :comment,
-  join: p1 in Blog.Schema.Post, as: :post, on: p1.id == c0.post_id,
-  where: p1.slug == ^"P123",
-  intersect: (from c0 in Blog.Schema.Comment,
-  as: :comment,
-  join: p1 in Blog.Schema.Post,
-  as: :post,
-  on: p1.id == c0.post_id,
-  where: p1.user_id == ^"5ed1fb19-4f1b-4926-abe0-0a28fb42dadd"),
-  intersect: (from c0 in Blog.Schema.Comment,
-  as: :comment,
-  where: c0.post_id == ^"5064fe2a-e392-4a2a-92d5-86c85befced7",
-  union: (from c0 in Blog.Schema.Comment,
-  as: :comment,
-  join: p1 in Blog.Schema.Post,
-  as: :post,
-  on: p1.id == c0.post_id,
-  where: p1.user_id == ^"5064fe2a-e392-4a2a-92d5-86c85befced7")),
-  intersect: (from c0 in Blog.Schema.Comment,
-  as: :comment,
-  join: p1 in Blog.Schema.Post,
-  as: :post,
-  on: p1.id == c0.post_id,
-  where: p1.slug == ^"P098",
-  union: (from c0 in Blog.Schema.Comment,
-  as: :comment,
-  join: p1 in Blog.Schema.Post,
-  as: :post,
-  on: p1.id == c0.post_id,
-  where: p1.slug == ^"P091"),
-  union: (from c0 in Blog.Schema.Comment,
-  as: :comment,
-  join: p1 in Blog.Schema.Post,
-  as: :post,
-  on: p1.id == c0.post_id,
-  where: p1.user_id == ^"f6dc2148-7012-4fde-820e-a2dd4699d122"))>
-  ```
-
-  To prove that bindings are correctly set, we can actually execute the query:
-
-  ```elixir
-  iex> Blog.Repo.all(q)
-
-  21:25:54.136 [debug] QUERY OK source="comments" db=2.0ms decode=1.4ms queue=2.2ms idle=274.4ms
-  SELECT c0."id", c0."text", c0."active", c0."post_id", c0."inserted_at", c0."updated_at" FROM "comments" AS c0 INNER JOIN "posts" AS p1 ON p1."id" = c0."post_id" WHERE (p1."slug" = $1) INTERSECT (SELECT c0."id", c0."text", c0."active", c0."post_id", c0."inserted_at", c0."updated_at" FROM "comments" AS c0 INNER JOIN "posts" AS p1 ON p1."id" = c0."post_id" WHERE (p1."user_id" = $2)) INTERSECT (SELECT c0."id", c0."text", c0."active", c0."post_id", c0."inserted_at", c0."updated_at" FROM "comments" AS c0 WHERE (c0."post_id" = $3) UNION (SELECT c0."id", c0."text", c0."active", c0."post_id", c0."inserted_at", c0."updated_at" FROM "comments" AS c0 INNER JOIN "posts" AS p1 ON p1."id" = c0."post_id" WHERE (p1."user_id" = $4))) INTERSECT (SELECT c0."id", c0."text", c0."active", c0."post_id", c0."inserted_at", c0."updated_at" FROM "comments" AS c0 INNER JOIN "posts" AS p1 ON p1."id" = c0."post_id" WHERE (p1."slug" = $5) UNION (SELECT c0."id", c0."text", c0."active", c0."post_id", c0."inserted_at", c0."updated_at" FROM "comments" AS c0 INNER JOIN "posts" AS p1 ON p1."id" = c0."post_id" WHERE (p1."slug" = $6)) UNION (SELECT c0."id", c0."text", c0."active", c0."post_id", c0."inserted_at", c0."updated_at" FROM "comments" AS c0 INNER JOIN "posts" AS p1 ON p1."id" = c0."post_id" WHERE (p1."user_id" = $7))) ["P123", "c03a7c37-5193-4555-a1a1-e8bac37ce825", "7928ce87-1f4c-4a42-aa31-29a66ba21dfb", "7928ce87-1f4c-4a42-aa31-29a66ba21dfb", "P098", "P091", "b48f5fb2-9c49-427f-a2ad-86d9c63c044a"]
-  []
-  ```
-  """
   def filter_fun do
     quote do
       import Ecto.Query
@@ -208,18 +116,6 @@ defmodule Graphism.Querying do
     end
   end
 
-  @doc """
-  Generates an `evaluate/2` function that takes a map context, and an path, and returns the result of traversing the
-    context.
-
-  For example, the expression:
-
-  ```elixir
-  iex> Blog.Schema.evaluate(user, [:posts, comments, :text])
-  ```
-
-  would return all the comments' text for the user found in the context. Relations are resolved lazily and cached.
-  """
   def evaluate_fun(repo) do
     quote do
       def evaluate(nil, _), do: nil
@@ -321,11 +217,6 @@ defmodule Graphism.Querying do
     end
   end
 
-  @doc """
-  Returns a `compare/3` function that takes two values and a comparator, and performs a fuzzy comparison according to
-    some predefined rules.
-
-  """
   def compare_fun do
     quote do
       def compare(nil, nil, _), do: true
