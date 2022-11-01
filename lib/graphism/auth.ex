@@ -3,9 +3,13 @@ defmodule Graphism.Auth do
 
   alias Graphism.Entity
 
-  def auth_funs(schema, policies, roles) do
+  def auth_funs(schema, policies, roles_expr) do
+    unless roles_expr do
+      raise "No role expression set in schema and no custom authorization is being used"
+    end
+
     [
-      role_fun(roles),
+      role_fun(roles_expr),
       combine_policies_fun(),
       reduce_policies_fun(),
       non_list_actions_allow_funs(schema, policies),
@@ -31,9 +35,9 @@ defmodule Graphism.Auth do
 
   defp non_list_actions_allow_funs(schema, policies) do
     for e <- schema, {action, opts} <- Entity.non_list_actions(e) do
-      case opts[:policies] do
-        [_ | _] = action_policies ->
-          action_policies = resolve_policies(action_policies, policies, e[:name], action)
+      case opts[:policy] do
+        [_ | _] = policy ->
+          policy = resolve_policies(policy, policies, e[:name], action)
 
           quote do
             def allow?(
@@ -42,7 +46,7 @@ defmodule Graphism.Auth do
                 ) do
               context
               |> with_role()
-              |> policy_allow?(unquote(Macro.escape(action_policies)), args, context)
+              |> policy_allow?(unquote(Macro.escape(policy)), args, context)
             end
           end
 
@@ -54,9 +58,9 @@ defmodule Graphism.Auth do
 
   defp list_actions_allow_funs(schema, policies) do
     for e <- schema, {action, opts} <- Entity.list_actions(e) do
-      case opts[:policies] do
-        [_ | _] = action_policies ->
-          action_policies = resolve_policies(action_policies, policies, e[:name], action)
+      case opts[:policy] do
+        [_ | _] = policy ->
+          policy = resolve_policies(policy, policies, e[:name], action)
 
           quote do
             def allow?(
@@ -65,7 +69,7 @@ defmodule Graphism.Auth do
                 ) do
               context
               |> with_role()
-              |> role_allow?(unquote(Macro.escape(action_policies)), args, context)
+              |> role_allow?(unquote(Macro.escape(policy)), args, context)
             end
           end
 
@@ -167,10 +171,10 @@ defmodule Graphism.Auth do
 
   defp role_allow_fun do
     quote do
-      defp role_allow(nil, _, _, _), do: false
+      defp role_allow?(nil, _, _, _), do: false
       defp role_allow?([], _, _, _), do: false
 
-      defp role_allow(roles, policies, _, _) do
+      defp role_allow?(roles, policies, _, _) do
         roles
         |> Enum.map(&Keyword.get(policies, &1))
         |> Enum.reject(&is_nil/1)
@@ -179,8 +183,9 @@ defmodule Graphism.Auth do
             false
 
           _ ->
-            # we need to check if these policies are explicitly denying
+            # we would need to check if any of these policies are explicitly denying
             # the action. For now, we assume the presence means it is okay
+            # and we will let the scope function to filter out results
             true
         end
       end

@@ -62,7 +62,7 @@ defmodule Graphism.Entity do
     Enum.reject(e[:actions], &action_of_kind?(&1, :list))
   end
 
-  defp action_of_kind?({_, opts}, kind), do: opts[:kind] == kind
+  defp action_of_kind?({_, opts}, kind), do: kind in (opts[:kind] || [])
 
   def virtual?(e), do: modifier?(e, :virtual)
   def client_ids?(e), do: modifier?(e, :client_ids)
@@ -875,41 +875,76 @@ defmodule Graphism.Entity do
     end
   end
 
-  def with_action_policies(opts) do
+  def with_action_kind(opts, name) when name in [:create, :update, :delete] do
+    Keyword.put(opts, :kind, [:write])
+  end
+
+  def with_action_kind(opts, name) when name in [:list] do
+    Keyword.put(opts, :kind, [:read, :list])
+  end
+
+  def with_action_kind(opts, name) when name in [:read] do
+    Keyword.put(opts, :kind, [:read])
+  end
+
+  def with_action_policy(opts) do
     case opts[:do] do
       nil ->
         opts
 
       block ->
-        policies =
-          block
-          |> action_policies()
-          |> List.flatten()
-
-        Keyword.put(opts, :policies, policies)
+        block
+        |> action_policy()
+        |> List.flatten()
+        |> case do
+          [] -> opts
+          policy -> Keyword.put(opts, :policy, policy)
+        end
     end
   end
 
-  defp action_policies({:__block__, _, block}) do
+  defp action_policy({:__block__, _, block}) do
     block
-    |> Enum.map(&action_policies/1)
+    |> Enum.map(&action_policy/1)
     |> Enum.reject(&is_nil/1)
   end
 
-  defp action_policies({:policy, _, policy}), do: action_policy(policy)
-  defp action_policies(_), do: []
+  defp action_policy({:policy, _, [roles]}), do: roles
+  defp action_policy(_), do: []
 
-  defp action_policy([policy, [for_role: role]]) do
-    [{role, policy}]
+  def entity_policy({:__block__, _, items}) do
+    items
+    |> entity_policy()
+    |> Enum.reduce([], fn
+      {:default, roles}, acc ->
+        acc
+        |> Keyword.put_new(:read, roles)
+        |> Keyword.put_new(:write, roles)
+
+      {kind, roles}, acc ->
+        Keyword.put(acc, kind, roles)
+    end)
   end
 
-  defp action_policy([[all: policies, for_role: role]]) do
-    [{role, all: policies}]
+  def entity_policy(items) when is_list(items) do
+    items
+    |> Enum.flat_map(&entity_policy/1)
+    |> Enum.reject(&is_nil/1)
   end
 
-  defp action_policy([[one: policies, for_role: role]]) do
-    [{role, one: policies}]
+  def entity_policy({:policy, _, [[do: {:__block__, _, items}]]}) when is_list(items) do
+    Enum.map(items, &entity_policy/1)
   end
+
+  def entity_policy({kind, _, [roles]}) when kind in [:read, :write] do
+    {kind, roles}
+  end
+
+  def entity_policy({:policy, _, [roles]}) do
+    [{:default, roles}]
+  end
+
+  def entity_policy(_other), do: []
 
   def actions_from({:__block__, _, actions}, entity_name) do
     actions
@@ -936,6 +971,7 @@ defmodule Graphism.Entity do
   def action_from(name, opts, entity_name) do
     opts =
       opts
+      |> with_action_kind(name)
       |> with_action_hook(:using)
       |> with_action_hook(:before)
       |> with_action_hook(:after)
@@ -943,10 +979,32 @@ defmodule Graphism.Entity do
       |> with_action_args(entity_name)
       |> with_action_hook(:allow)
       |> with_action_hook(:scope)
-      |> with_action_policies()
+      |> with_action_policy()
       |> Keyword.drop([:do])
 
     [name: name, opts: opts]
+  end
+
+  def actions_with_policies(actions, default) do
+    Enum.map(actions, fn {name, opts} ->
+      opts =
+        case default_policy_for(opts[:kind], default) do
+          nil ->
+            opts
+
+          default_policy ->
+            Keyword.put_new(opts, :policy, default_policy)
+        end
+
+      {name, opts}
+    end)
+  end
+
+  defp default_policy_for(kinds, policies) do
+    kinds
+    |> Enum.map(&Keyword.get(policies, &1))
+    |> Enum.reject(&is_nil/1)
+    |> List.first()
   end
 
   def lists_from({:__block__, _, actions}, entity_name) do

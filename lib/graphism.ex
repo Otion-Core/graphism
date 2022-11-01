@@ -282,8 +282,15 @@ defmodule Graphism do
       Entity.attributes_from(block)
       |> Entity.maybe_add_id_attribute()
 
+    entity_policy = Entity.entity_policy(block)
+
     rels = Entity.relations_from(block)
-    actions = Entity.actions_from(block, name)
+
+    actions =
+      block
+      |> Entity.actions_from(name)
+      |> Entity.actions_with_policies(entity_policy)
+
     lists = Entity.lists_from(block, name)
     keys = Entity.keys_from(block)
 
@@ -397,6 +404,9 @@ defmodule Graphism do
   end
 
   defmacro json(_name, _opts \\ []) do
+  end
+
+  defmacro policy(_opts) do
   end
 
   defmacro policy(name, opts \\ [], do: block) do
