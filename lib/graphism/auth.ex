@@ -3,22 +3,21 @@ defmodule Graphism.Auth do
 
   alias Graphism.Entity
 
-  def auth_funs(schema, policies, roles_expr) do
+  def auth_funs(schema, scopes, default_policy, roles_expr) do
     unless roles_expr do
       raise "No role expression set in schema and no custom authorization is being used"
     end
 
     [
       role_fun(roles_expr),
-      combine_policies_fun(),
-      reduce_policies_fun(),
-      non_list_actions_allow_funs(schema, policies),
-      list_actions_allow_funs(schema, policies),
+      policy_from_roles_fun(),
+      non_list_actions_allow_funs(schema, scopes, default_policy),
+      list_actions_allow_funs(schema, scopes, default_policy),
       default_allow_fun(),
       policy_allow_fun(),
       role_allow_fun(),
       import_ecto_query(),
-      scope_fun(schema, policies),
+      scope_fun(schema, scopes, default_policy),
       scope_helper_fun()
     ]
     |> Enum.reject(&is_nil/1)
@@ -33,77 +32,60 @@ defmodule Graphism.Auth do
     end
   end
 
-  defp non_list_actions_allow_funs(schema, policies) do
+  defp non_list_actions_allow_funs(schema, scopes, default_policy) do
     for e <- schema, {action, opts} <- Entity.non_list_actions(e) do
-      case opts[:policy] do
-        [_ | _] = policy ->
-          policy = resolve_policies(policy, policies, e[:name], action)
+      policies = Keyword.fetch!(opts, :policies)
+      policies = resolve_scopes(policies, scopes)
 
-          quote do
-            def allow?(
-                  args,
-                  %{graphism: %{entity: unquote(e[:name]), action: unquote(action)}} = context
-                ) do
-              context
-              |> with_role()
-              |> policy_allow?(unquote(Macro.escape(policy)), args, context)
-            end
-          end
-
-        _ ->
-          default_allow_fun(e[:name], action)
+      quote do
+        def allow?(unquote(e[:name]), unquote(action), args, context) do
+          context
+          |> with_role()
+          |> policy_allow?(unquote(Macro.escape(policies)), unquote(default_policy), args, context)
+        end
       end
     end
   end
 
-  defp list_actions_allow_funs(schema, policies) do
+  defp list_actions_allow_funs(schema, scopes, default_policy) do
     for e <- schema, {action, opts} <- Entity.list_actions(e) do
-      case opts[:policy] do
-        [_ | _] = policy ->
-          policy = resolve_policies(policy, policies, e[:name], action)
+      policies = Keyword.fetch!(opts, :policies)
+      policies = resolve_scopes(policies, scopes)
 
-          quote do
-            def allow?(
-                  args,
-                  %{graphism: %{entity: unquote(e[:name]), action: unquote(action)}} = context
-                ) do
-              context
-              |> with_role()
-              |> role_allow?(unquote(Macro.escape(policy)), args, context)
-            end
-          end
-
-        _ ->
-          default_allow_fun(e[:name], action)
+      quote do
+        def allow?(unquote(e[:name]), unquote(action), args, context) do
+          context
+          |> with_role()
+          |> role_allow?(unquote(Macro.escape(policies)), unquote(default_policy), args, context)
+        end
       end
     end
   end
 
-  defp resolve_policies(action_policies, policies, entity, action) do
-    Enum.map(action_policies, fn {role, policy} ->
-      {role, resolve_policy(policy, policies, entity, action)}
+  defp resolve_scopes(action_policies, scopes) do
+    Enum.map(action_policies, fn {action, role, scope} ->
+      case resolve_scope(scope, scopes) do
+        nil -> {role, action}
+        scope -> {role, {action, scope}}
+      end
     end)
   end
 
-  defp resolve_policy(%{action: _} = policy, _policies, _, _), do: policy
-
-  defp resolve_policy(name, policies, entity, action) when is_atom(name) do
-    case Map.get(policies, name) do
-      nil ->
-        raise "No such policy #{inspect(name)} in #{inspect(Map.keys(policies))} for action #{inspect(action)} of entity #{inspect(entity)}"
-
-      policy ->
-        resolve_policy(policy, policies, entity, action)
+  defp resolve_scope(name, scopes) when is_atom(name) do
+    with scope when scope != nil <- Map.get(scopes, name) do
+      resolve_scope(scope, scopes)
     end
   end
 
-  defp resolve_policy([all: list], policies, entity, action) when is_list(list) do
-    %{all: Enum.map(list, &resolve_policy(&1, policies, entity, action))}
+  defp resolve_scope([all: list], scopes) when is_list(list) do
+    %{all: Enum.map(list, &resolve_scope(&1, scopes))}
   end
 
-  defp resolve_policy([any: list], policies, entity, action) when is_list(list) do
-    %{any: Enum.map(list, &resolve_policy(&1, policies, entity, action))}
+  defp resolve_scope([any: list], scopes) when is_list(list) do
+    %{any: Enum.map(list, &resolve_scope(&1, scopes))}
   end
+
+  defp resolve_scope(%{name: _, op: _, prop: _, value: _} = scope, _), do: scope
 
   defp default_allow_fun(entity, action) do
     quote do
@@ -120,13 +102,15 @@ defmodule Graphism.Auth do
 
   defp policy_allow_fun do
     quote do
-      defp policy_allow?(nil, _, _, _), do: false
-      defp policy_allow?([], _, _, _), do: false
+      defp policy_allow?(roles, _, default_policy, _, _) when is_nil(roles) or roles == [] do
+        default_policy == :allow
+      end
 
-      defp policy_allow?(roles, policies, args, context) do
-        roles
-        |> reduce_policies(policies)
-        |> policy_allow?(args, context)
+      defp policy_allow?(roles, policies, default_policy, args, context) do
+        case policy_from_roles(roles, policies) do
+          [] -> default_policy == :allow
+          policy -> policy_allow?(policy, args, context)
+        end
       end
 
       defp policy_allow?(%{any: policies}, args, context) do
@@ -153,28 +137,20 @@ defmodule Graphism.Auth do
         value = evaluate(context, value)
         result = compare(prop, value, op)
 
-        IO.inspect(
-          context: context,
-          prop: prop,
-          prop_spec: prop_spec,
-          value: value,
-          result: result,
-          action: action
-        )
-
         with true <- result, do: action == :allow
       end
 
-      defp policy_allow?(%{action: action}, _, _), do: action == :allow
+      defp policy_allow?(:allow, _, _), do: true
+      defp policy_allow?(:deny, _, _), do: false
     end
   end
 
   defp role_allow_fun do
     quote do
-      defp role_allow?(nil, _, _, _), do: false
-      defp role_allow?([], _, _, _), do: false
+      defp role_allow?(nil, _, _, _, _), do: false
+      defp role_allow?([], _, _, _, _), do: false
 
-      defp role_allow?(roles, policies, _, _) do
+      defp role_allow?(roles, policies, _default_policy, _, _) do
         roles
         |> Enum.map(&Keyword.get(policies, &1))
         |> Enum.reject(&is_nil/1)
@@ -198,25 +174,20 @@ defmodule Graphism.Auth do
     end
   end
 
-  defp scope_fun(schema, policies) do
+  defp scope_fun(schema, scopes, _default_policy) do
     for e <- schema, {action, opts} <- e[:actions] do
-      case opts[:policies] do
-        [_ | _] = action_policies ->
-          action_policies = resolve_policies(action_policies, policies, e[:name], action)
+      policies = Keyword.fetch!(opts, :policies)
+      policies = resolve_scopes(policies, scopes)
 
-          quote do
-            def scope(
-                  q,
-                  %{graphism: %{entity: unquote(e[:name]), action: unquote(action)}} = context
-                ) do
-              context
-              |> with_role()
-              |> scope(unquote(Macro.escape(action_policies)), q, context)
-            end
-          end
-
-        _ ->
-          default_scope_fun(e[:name], action)
+      quote do
+        def scope(
+              q,
+              %{graphism: %{entity: unquote(e[:name]), action: unquote(action)}} = context
+            ) do
+          context
+          |> with_role()
+          |> scope(unquote(Macro.escape(policies)), q, context)
+        end
       end
     end ++ [default_scope_fun()]
   end
@@ -228,7 +199,7 @@ defmodule Graphism.Auth do
 
       defp scope(roles, policies, q, context) do
         roles
-        |> reduce_policies(policies)
+        |> policy_from_roles(policies)
         |> scope(q, context)
       end
 
@@ -287,28 +258,17 @@ defmodule Graphism.Auth do
     end
   end
 
-  defp reduce_policies_fun do
+  defp policy_from_roles_fun do
     quote do
-      defp reduce_policies(roles, policies) do
+      defp policy_from_roles(roles, policies) do
         roles
         |> Enum.map(&Keyword.get(policies, &1))
         |> Enum.reject(&is_nil/1)
         |> case do
+          [] -> []
           [policy] -> policy
-          policies -> combine_policies(policies, :any)
+          policies -> %{any: policies}
         end
-      end
-    end
-  end
-
-  defp combine_policies_fun do
-    quote do
-      defp combine_policies([], _) do
-        %{action: :deny}
-      end
-
-      defp combine_policies(policies, op) do
-        %{op => policies}
       end
     end
   end

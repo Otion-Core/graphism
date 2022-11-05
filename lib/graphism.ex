@@ -31,8 +31,13 @@ defmodule Graphism do
       persist: true
     )
 
-    Module.register_attribute(__CALLER__.module, :policy,
+    Module.register_attribute(__CALLER__.module, :scope,
       accumulate: true,
+      persist: true
+    )
+
+    Module.register_attribute(__CALLER__.module, :default_policy,
+      accumulate: false,
       persist: true
     )
 
@@ -113,10 +118,12 @@ defmodule Graphism do
       |> Module.get_attribute(:schema)
       |> Entity.resolve_schema()
 
-    policies =
+    scopes =
       caller_module
-      |> Module.get_attribute(:policy)
+      |> Module.get_attribute(:scope)
       |> index_by(:name)
+
+    default_policy = Module.get_attribute(caller_module, :default_policy)
 
     role = Module.get_attribute(caller_module, :role)
 
@@ -173,7 +180,7 @@ defmodule Graphism do
 
     auth_funs =
       if auth_module == caller_module do
-        Graphism.Auth.auth_funs(schema, policies, role)
+        Graphism.Auth.auth_funs(schema, scopes, default_policy, role)
       else
         nil
       end
@@ -282,14 +289,14 @@ defmodule Graphism do
       Entity.attributes_from(block)
       |> Entity.maybe_add_id_attribute()
 
-    entity_policy = Entity.entity_policy(block)
+    entity_policies = Entity.entity_policies(block)
 
     rels = Entity.relations_from(block)
 
     actions =
       block
       |> Entity.actions_from(name)
-      |> Entity.actions_with_policies(entity_policy)
+      |> Entity.actions_with_policies(name, entity_policies)
 
     lists = Entity.lists_from(block, name)
     keys = Entity.keys_from(block)
@@ -406,19 +413,29 @@ defmodule Graphism do
   defmacro json(_name, _opts \\ []) do
   end
 
-  defmacro policy(_opts) do
+  defmacro allow(_block) do
   end
 
-  defmacro policy(name, opts \\ [], do: block) do
-    policy =
+  defmacro read(_role, _block) do
+  end
+
+  defmacro write(_role, _block \\ nil) do
+  end
+
+  defmacro scope(name, block) do
+    scope =
       block
-      |> Policy.from_block(opts)
+      |> Policy.scope_from()
       |> Policy.with_name(name)
 
-    Module.put_attribute(__CALLER__.module, :policy, policy)
+    Module.put_attribute(__CALLER__.module, :scope, scope)
   end
 
-  defmacro allow_if(_block) do
+  defmacro scope(_name) do
+  end
+
+  defmacro policy(policy) do
+    Module.put_attribute(__CALLER__.module, :default_policy, policy)
   end
 
   defmacro role(expr) do
