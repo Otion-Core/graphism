@@ -206,11 +206,11 @@ defmodule Graphism.Api do
   defp with_query_scope_fun(funs, e) do
     [
       quote do
-        defp scoped_query(query, mod, context, telemetry_name) do
-          meta = %{entity: unquote(e[:name]), kind: :scope, value: telemetry_name}
+        defp scoped_query(query, mod, context, action) do
+          meta = %{entity: unquote(e[:name]), kind: :scope, value: action}
 
           :telemetry.span([:graphism, :scope], meta, fn ->
-            {mod.scope(query, context), meta}
+            {mod.scope(unquote(e[:name]), action, query, context), meta}
           end)
         end
       end
