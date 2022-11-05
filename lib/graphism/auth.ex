@@ -109,39 +109,38 @@ defmodule Graphism.Auth do
       defp policy_allow?(roles, policies, default_policy, args, context) do
         case policy_from_roles(roles, policies) do
           [] -> default_policy == :allow
-          policy -> policy_allow?(policy, args, context)
+          policy -> do_policy_allow?(policy, args, context)
         end
       end
 
-      defp policy_allow?(%{any: policies}, args, context) do
+      defp do_policy_allow?(%{any: policies}, args, context) do
         Enum.reduce_while(policies, false, fn policy, _ ->
-          case policy_allow?(policy, args, context) do
+          case do_policy_allow?(policy, args, context) do
             true -> {:halt, true}
             false -> {:cont, false}
           end
         end)
       end
 
-      defp policy_allow?(%{all: policies}, args, context) do
+      defp do_policy_allow?(%{all: policies}, args, context) do
         Enum.reduce_while(policies, false, fn policy, _ ->
-          case policy_allow?(policy, args, context) do
+          case do_policy_allow?(policy, args, context) do
             true -> {:cont, true}
             false -> {:halt, false}
           end
         end)
       end
 
-      defp policy_allow?(%{action: action, prop: prop_spec, value: value, op: op}, args, context) do
+      defp do_policy_allow?({policy, %{prop: prop_spec, value: value_spec, op: op}}, args, context) do
         context = Map.put(context, :args, args)
         prop = evaluate(context, prop_spec)
-        value = evaluate(context, value)
+        value = evaluate(context, value_spec)
         result = compare(prop, value, op)
-
-        with true <- result, do: action == :allow
+        with true <- result, do: policy == :allow
       end
 
-      defp policy_allow?(:allow, _, _), do: true
-      defp policy_allow?(:deny, _, _), do: false
+      defp do_policy_allow?(:allow, _, _), do: true
+      defp do_policy_allow?(:deny, _, _), do: false
     end
   end
 

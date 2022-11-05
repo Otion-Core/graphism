@@ -434,8 +434,12 @@ defmodule Graphism do
   defmacro scope(_name) do
   end
 
-  defmacro policy(policy) do
-    Module.put_attribute(__CALLER__.module, :default_policy, policy)
+  defmacro deny do
+    Module.put_attribute(__CALLER__.module, :default_policy, :deny)
+  end
+
+  defmacro allow do
+    Module.put_attribute(__CALLER__.module, :default_policy, :allow)
   end
 
   defmacro role(expr) do

@@ -909,7 +909,12 @@ defmodule Graphism.Entity do
     |> Enum.reject(&is_nil/1)
   end
 
-  defp action_policies({:policy, _, [roles]}), do: roles
+  defp action_policies({policy, _, [role]}), do: [{policy, role, :any}]
+
+  defp action_policies({policy, _, [role, {:scope, _, [scope]}]}) do
+    [{policy, role, scope}]
+  end
+
   defp action_policies(_), do: []
 
   def entity_policies({:__block__, _, spec}) do

@@ -94,10 +94,6 @@ defmodule Graphism.Rest do
           end
         end
 
-        def with_item(assigns, item) do
-          Map.put(assigns, assigns.graphism.entity, item)
-        end
-
         def allowed?(entity, action, assigns, args \\ nil) do
           if unquote(auth_module).allow?(entity, action, args, assigns) do
             :ok
@@ -478,7 +474,8 @@ defmodule Graphism.Rest do
       quote do
         def handle(conn, _opts) do
           with {:ok, item} <- lookup(conn, "id", unquote(e[:api_module]), :required),
-               :ok <- allowed?(unquote(e[:name]), :read, with_item(conn.assigns, item)) do
+               conn <- assign(conn, unquote(e[:name]), item),
+               :ok <- allowed?(unquote(e[:name]), :read, conn.assigns) do
             send_json(conn, item)
           else
             {:error, reason} ->
@@ -516,7 +513,8 @@ defmodule Graphism.Rest do
         def handle(conn, _opts) do
           with unquote_splicing(cast_params),
                {:ok, item} <- unquote(e[:api_module]).unquote(api_fun)(unquote_splicing(vars)),
-               :ok <- allowed?(unquote(e[:name]), unquote(action), with_item(conn.assigns, item)) do
+               conn <- assign(conn, unquote(e[:name]), item),
+               :ok <- allowed?(unquote(e[:name]), unquote(action), conn.assigns) do
             send_json(conn, item)
           else
             {:error, reason} ->
@@ -714,7 +712,8 @@ defmodule Graphism.Rest do
                  lookup(conn, "id", unquote(e[:api_module]), :required),
                args <- %{},
                unquote_splicing(args),
-               :ok <- allowed?(unquote(e[:name]), :update, with_item(conn.assigns, unquote(Ast.var(e))), args),
+               conn <- assign(conn, unquote(e[:name]), unquote(Ast.var(e))),
+               :ok <- allowed?(unquote(e[:name]), :update, conn.assigns, args),
                {:ok, unquote(Ast.var(e))} <-
                  unquote(e[:api_module]).update(
                    unquote_splicing(handler_parent_arg_vars(e)),
@@ -738,7 +737,8 @@ defmodule Graphism.Rest do
         def handle(conn, _opts) do
           with {:ok, id} <- cast_param(conn, "id", :id),
                {:ok, item} <- unquote(e[:api_module]).get_by_id(id),
-               :ok <- allowed?(unquote(e[:name]), :delete, with_item(conn.assigns, item)),
+               conn <- assign(conn, unquote(e[:name]), item),
+               :ok <- allowed?(unquote(e[:name]), :delete, conn.assigns),
                {:ok, _} <- unquote(e[:api_module]).delete(item) do
             send_json(conn, %{})
           else
