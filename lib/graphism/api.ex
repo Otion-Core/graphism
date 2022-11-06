@@ -642,7 +642,7 @@ defmodule Graphism.Api do
       quote do
         {:ok, unquote(Ast.var(e))} <-
           unquote(Ast.var(e))
-          |> unquote(schema_module).changeset(unquote(Ast.var(:attrs)))
+          |> unquote(schema_module).update_changeset(unquote(Ast.var(:attrs)))
           |> unquote(repo_module).update()
       end
 

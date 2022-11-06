@@ -179,61 +179,36 @@ defmodule Graphism.Schema do
 
         unquote_splicing(inverse_relation_ast(e, schema))
 
+        defp add_default_if_missing(changeset, attr, value) do
+          case get_field(changeset, attr) do
+            nil -> put_change(changeset, attr, value)
+            _ -> changeset
+          end
+        end
+
         def changeset(e, attrs) do
-          changes =
-            e
-            |> cast(attrs, @all_fields)
-            |> validate_required(@required_fields)
-            |> unique_constraint(:id, name: unquote("#{e[:table]}_pkey"))
+          (unquote_splicing(
+             List.flatten([
+               fields_changeset_ast(e),
+               default_fields_changeset_ast(e),
+               max_length_fields_changeset_ast(e),
+               unique_constraints_changeset_ast(indices, scope_columns),
+               foreign_key_constraints_changeset_ast(e)
+             ])
+           ))
+        end
 
-          unquote_splicing(
-            e[:attributes]
-            |> Enum.filter(fn attr -> attr[:kind] == :string end)
-            |> Enum.reject(fn attr -> attr[:opts][:store] == :text end)
-            |> Enum.map(fn attr ->
-              quote do
-                changes =
-                  changes
-                  |> validate_length(unquote(attr[:name]), max: 255, message: "should be at most 255 characters")
-              end
-            end)
-          )
-
-          unquote_splicing(
-            Enum.map(indices, fn index ->
-              field_name = (index.columns -- scope_columns) |> Enum.join("_") |> String.to_atom()
-
-              quote do
-                changes =
-                  changes
-                  |> unique_constraint(
-                    unquote(field_name),
-                    name: unquote(index.name)
-                  )
-              end
-            end)
-          )
-
-          unquote_splicing(
-            e
-            |> Entity.parent_relations()
-            |> Enum.map(fn rel ->
-              constraint = Migrations.foreign_key_constraint_from_relation(e, rel)
-              name = constraint[:name]
-              field = constraint[:field]
-              message = "referenced data does not exist"
-
-              quote do
-                changes =
-                  changes
-                  |> foreign_key_constraint(
-                    unquote(field),
-                    name: unquote(name),
-                    message: unquote(message)
-                  )
-              end
-            end)
-          )
+        def update_changeset(e, attrs) do
+          (unquote_splicing(
+             List.flatten([
+               immutable_fields_changeset_ast(e),
+               fields_changeset_ast(e),
+               default_fields_changeset_ast(e),
+               max_length_fields_changeset_ast(e),
+               unique_constraints_changeset_ast(indices, scope_columns),
+               foreign_key_constraints_changeset_ast(e)
+             ])
+           ))
         end
 
         def delete_changeset(e) do
@@ -629,5 +604,85 @@ defmodule Graphism.Schema do
           end
         end
       ]
+  end
+
+  defp immutable_fields_changeset_ast(e) do
+    immutable_fields = e[:attributes] |> Enum.filter(&Entity.immutable?/1) |> Entity.names()
+
+    quote do
+      attrs = Map.drop(attrs, unquote(immutable_fields))
+    end
+  end
+
+  defp fields_changeset_ast(e) do
+    quote do
+      changes =
+        e
+        |> cast(attrs, @all_fields)
+        |> validate_required(@required_fields)
+        |> unique_constraint(:id, name: unquote("#{e[:table]}_pkey"))
+    end
+  end
+
+  defp default_fields_changeset_ast(e) do
+    e[:attributes]
+    |> Enum.filter(&Entity.optional?/1)
+    |> Enum.filter(fn attr -> get_in(attr, [:opts, :default]) end)
+    |> Enum.map(fn attr ->
+      default_value = get_in(attr, [:opts, :default])
+
+      quote do
+        changes = add_default_if_missing(changes, unquote(attr[:name]), unquote(default_value))
+      end
+    end)
+  end
+
+  defp max_length_fields_changeset_ast(e) do
+    e[:attributes]
+    |> Enum.filter(fn attr -> attr[:kind] == :string end)
+    |> Enum.reject(fn attr -> attr[:opts][:store] == :text end)
+    |> Enum.map(fn attr ->
+      quote do
+        changes =
+          changes
+          |> validate_length(unquote(attr[:name]), max: 255, message: "should be at most 255 characters")
+      end
+    end)
+  end
+
+  defp unique_constraints_changeset_ast(indices, scope_columns) do
+    Enum.map(indices, fn index ->
+      field_name = (index.columns -- scope_columns) |> Enum.join("_") |> String.to_atom()
+
+      quote do
+        changes =
+          changes
+          |> unique_constraint(
+            unquote(field_name),
+            name: unquote(index.name)
+          )
+      end
+    end)
+  end
+
+  defp foreign_key_constraints_changeset_ast(e) do
+    e
+    |> Entity.parent_relations()
+    |> Enum.map(fn rel ->
+      constraint = Migrations.foreign_key_constraint_from_relation(e, rel)
+      name = constraint[:name]
+      field = constraint[:field]
+      message = "referenced data does not exist"
+
+      quote do
+        changes =
+          changes
+          |> foreign_key_constraint(
+            unquote(field),
+            name: unquote(name),
+            message: unquote(message)
+          )
+      end
+    end)
   end
 end
