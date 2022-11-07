@@ -285,9 +285,16 @@ defmodule Graphism do
   defmacro entity(name, opts \\ [], do: block) do
     caller_module = __CALLER__.module
 
+    schema_module =
+      Module.concat([
+        caller_module,
+        Inflex.camelize(name)
+      ])
+
     attrs =
       Entity.attributes_from(block)
       |> Entity.maybe_add_id_attribute()
+      |> Entity.maybe_add_slug_attribute(schema_module, block)
 
     entity_policies = Entity.entity_policies(block)
 
@@ -307,6 +314,7 @@ defmodule Graphism do
     entity =
       [
         name: name,
+        schema_module: schema_module,
         attributes: attrs,
         relations: rels,
         keys: keys,
@@ -317,7 +325,6 @@ defmodule Graphism do
       ]
       |> Entity.with_plural()
       |> Entity.with_table_name()
-      |> Entity.with_schema_module(caller_module)
       |> Entity.with_api_module(caller_module)
       |> Entity.with_resolver_module(caller_module)
       |> Entity.with_handler_module(caller_module)
@@ -444,5 +451,8 @@ defmodule Graphism do
 
   defmacro role(expr) do
     Module.put_attribute(__CALLER__.module, :role, expr)
+  end
+
+  defmacro slug(_field) do
   end
 end

@@ -26,6 +26,8 @@ defmodule Graphism.Schema do
         import Ecto.Changeset
         import Ecto.Query
 
+        unquote_splicing(slugify_module(e))
+
         def entity, do: unquote(e[:name])
 
         unquote_splicing(
@@ -684,5 +686,28 @@ defmodule Graphism.Schema do
           )
       end
     end)
+  end
+
+  defp slugify_module(e) do
+    e[:attributes]
+    |> Enum.filter(&(&1[:opts][:using] == Entity.slugify_module_name(e[:schema_module])))
+    |> Enum.map(fn attr ->
+      field = attr[:opts][:using_field]
+
+      quote do
+        defmodule Slugify do
+          def execute(args, _context) do
+            case Map.get(args, unquote(field)) do
+              nil ->
+                {:error, :invalid}
+
+              value ->
+                {:ok, Slug.slugify(value)}
+            end
+          end
+        end
+      end
+    end)
+    |> Enum.reject(&is_nil/1)
   end
 end

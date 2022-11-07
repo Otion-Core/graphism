@@ -568,6 +568,43 @@ defmodule Graphism.Rest do
     end
   end
 
+  defp handler_computed_attribute_args(e) do
+    e[:attributes]
+    |> Enum.filter(&Entity.computed?/1)
+    |> Enum.flat_map(&handler_attribute_compute_param(e, &1))
+  end
+
+  defp handler_attribute_compute_param(e, attr) do
+    cond do
+      attr[:opts][:using] != nil ->
+        mod = attr[:opts][:using]
+
+        [
+          quote do
+            {:ok, attr} <- unquote(mod).execute(args, conn.assigns)
+          end,
+          quote do
+            args <- Map.put(args, unquote(attr[:name]), attr)
+          end
+        ]
+
+      attr[:opts][:from_context] != nil ->
+        from = attr[:opts][:from_context]
+
+        [
+          quote do
+            args <- Map.put(args, unquote(attr[:name]), get_in(conn.assigns, unquote(from ++ [:id])))
+          end
+        ]
+
+      true ->
+        raise """
+        Attribute #{inspect(attr[:name])} of entity #{inspect(e[:name])} is computed but
+        does not specify a :using or :from_context option.
+        """
+    end
+  end
+
   defp handler_parent_arg_vars(e) do
     e |> Entity.parent_relations() |> Entity.names() |> Ast.vars()
   end
@@ -677,7 +714,11 @@ defmodule Graphism.Rest do
   end
 
   defp create_handler_module(e, opts) do
-    args = handler_attribute_args(e, opts) ++ handler_parent_args(e, opts)
+    args =
+      handler_attribute_args(e, opts) ++
+        handler_computed_attribute_args(e) ++
+        handler_parent_args(e, opts)
+
     args = [handler_id_arg(e, opts) | args]
 
     body =
@@ -703,7 +744,11 @@ defmodule Graphism.Rest do
 
   defp update_handler_module(e, opts) do
     opts = Keyword.put(opts, :mode, :update)
-    args = handler_attribute_args(e, opts) ++ handler_parent_args(e, opts)
+
+    args =
+      handler_attribute_args(e, opts) ++
+        handler_computed_attribute_args(e) ++
+        handler_parent_args(e, opts)
 
     body =
       quote do

@@ -600,10 +600,6 @@ defmodule Graphism.Entity do
     Keyword.put(entity, :table, table_name)
   end
 
-  def with_schema_module(entity, caller_mod) do
-    module_name(caller_mod, entity, :schema_module)
-  end
-
   def with_resolver_module(entity, caller_mod) do
     module_name(caller_mod, entity, :resolver_module, :resolver)
   end
@@ -772,6 +768,40 @@ defmodule Graphism.Entity do
     else
       attrs
     end
+  end
+
+  def maybe_add_slug_attribute(attrs, schema_module, block) do
+    case slug_field(block) do
+      nil ->
+        attrs
+
+      field ->
+        slug = [
+          name: :slug,
+          kind: :string,
+          opts: [
+            using: slugify_module_name(schema_module),
+            using_field: field,
+            modifiers: [:unique, :computed]
+          ]
+        ]
+
+        [slug | attrs]
+    end
+  end
+
+  def slugify_module_name(schema_module) do
+    Module.concat([schema_module, Slugify])
+  end
+
+  defp slug_field({:__block__, _, fields}) do
+    fields
+    |> Enum.map(fn
+      {:slug, _, [field]} -> field
+      _ -> nil
+    end)
+    |> Enum.reject(&is_nil/1)
+    |> List.first()
   end
 
   def relations_from({:__block__, _, rels}) do
