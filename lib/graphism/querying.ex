@@ -159,12 +159,6 @@ defmodule Graphism.Querying do
         end
       end
 
-      def evaluate(map, [:"**", ancestor | rest]) when is_map(map) do
-        map
-        |> Map.get(ancestor)
-        |> evaluate(rest)
-      end
-
       def evaluate(%{__struct__: _} = context, [field | _] = paths) when is_list(field) do
         paths
         |> Enum.map(&evaluate(context, &1))

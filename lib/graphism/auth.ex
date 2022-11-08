@@ -26,7 +26,7 @@ defmodule Graphism.Auth do
 
   defp role_fun(expr) do
     quote do
-      def with_role(context) do
+      def roles(context) do
         evaluate(context, unquote(expr))
       end
     end
@@ -40,8 +40,8 @@ defmodule Graphism.Auth do
       quote do
         def allow?(unquote(e[:name]), unquote(action), args, context) do
           context
-          |> with_role()
-          |> policy_allow?(unquote(Macro.escape(policies)), unquote(default_policy), args, context)
+          |> roles()
+          |> policy_allow?(unquote(Macro.escape(policies)), unquote(default_policy), args, context, unquote(e[:name]))
         end
       end
     end
@@ -55,7 +55,7 @@ defmodule Graphism.Auth do
       quote do
         def allow?(unquote(e[:name]), unquote(action), args, context) do
           context
-          |> with_role()
+          |> roles()
           |> role_allow?(unquote(Macro.escape(policies)), unquote(default_policy), args, context)
         end
       end
@@ -102,45 +102,46 @@ defmodule Graphism.Auth do
 
   defp policy_allow_fun do
     quote do
-      defp policy_allow?(roles, _, default_policy, _, _) when is_nil(roles) or roles == [] do
+      defp policy_allow?(roles, _, default_policy, _, _, _) when is_nil(roles) or roles == [] do
         default_policy == :allow
       end
 
-      defp policy_allow?(roles, policies, default_policy, args, context) do
+      defp policy_allow?(roles, policies, default_policy, args, context, entity) do
         case policy_from_roles(roles, policies) do
           [] -> default_policy == :allow
-          policy -> do_policy_allow?(policy, args, context)
+          policy -> do_policy_allow?(policy, args, context, entity)
         end
       end
 
-      defp do_policy_allow?(%{any: policies}, args, context) do
+      defp do_policy_allow?(%{any: policies}, args, context, entity) do
         Enum.reduce_while(policies, false, fn policy, _ ->
-          case do_policy_allow?(policy, args, context) do
+          case do_policy_allow?(policy, args, context, entity) do
             true -> {:halt, true}
             false -> {:cont, false}
           end
         end)
       end
 
-      defp do_policy_allow?(%{all: policies}, args, context) do
+      defp do_policy_allow?(%{all: policies}, args, context, entity) do
         Enum.reduce_while(policies, false, fn policy, _ ->
-          case do_policy_allow?(policy, args, context) do
+          case do_policy_allow?(policy, args, context, entity) do
             true -> {:cont, true}
             false -> {:halt, false}
           end
         end)
       end
 
-      defp do_policy_allow?({policy, %{prop: prop_spec, value: value_spec, op: op}}, args, context) do
+      defp do_policy_allow?({policy, %{prop: prop_spec, value: value_spec, op: op}}, args, context, entity) do
         context = Map.put(context, :args, args)
-        prop = evaluate(context, prop_spec)
+        prop = context |> Map.get(entity, context) |> evaluate(prop_spec)
         value = evaluate(context, value_spec)
         result = compare(prop, value, op)
+
         with true <- result, do: policy == :allow
       end
 
-      defp do_policy_allow?(:allow, _, _), do: true
-      defp do_policy_allow?(:deny, _, _), do: false
+      defp do_policy_allow?(:allow, _, _, _), do: true
+      defp do_policy_allow?(:deny, _, _, _), do: false
     end
   end
 
@@ -181,7 +182,7 @@ defmodule Graphism.Auth do
       quote do
         def scope(unquote(e[:name]), unquote(action), q, context) do
           context
-          |> with_role()
+          |> roles()
           |> do_scope(unquote(Macro.escape(policies)), q, unquote(e[:name]), unquote(e[:schema_module]), context)
         end
       end
