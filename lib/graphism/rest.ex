@@ -123,6 +123,13 @@ defmodule Graphism.Rest do
         defp cast(v, :string) when is_binary(v), do: {:ok, v}
         defp cast(json, :json) when is_map(json), do: {:ok, json}
 
+        defp cast(v, :datetime) do
+          case DateTime.from_iso8601(v) do
+            {:ok, dt, _} -> {:ok, dt}
+            {:error, _} -> {:error, :invalid}
+          end
+        end
+
         def as(result, arg, args \\ %{})
         def as({:ok, v}, arg, args), do: {:ok, Map.put(args, arg, v)}
         def as({:error, :continue}, _, args), do: {:ok, args}
@@ -621,34 +628,44 @@ defmodule Graphism.Rest do
     e
     |> Entity.parent_relations()
     |> Enum.reject(&Entity.computed?/1)
-    |> Enum.map(fn rel ->
+    |> Enum.flat_map(fn rel ->
       name = rel[:name]
       target = Entity.find_entity!(schema, rel[:target])
 
       case mode do
         :create ->
-          default = if Entity.optional?(rel), do: :optional, else: :invalid
+          default = if Entity.optional?(rel), do: :optional, else: :required
 
-          quote do
-            {:ok, unquote(Ast.var(name))} <-
-              lookup(
-                conn,
-                unquote(to_string(name)),
-                unquote(target[:api_module]),
-                unquote(default)
-              )
-          end
+          [
+            quote do
+              {:ok, unquote(Ast.var(name))} <-
+                lookup(
+                  conn,
+                  unquote(to_string(name)),
+                  unquote(target[:api_module]),
+                  unquote(default)
+                )
+            end,
+            quote do
+              conn <- assign(conn, unquote(rel[:name]), unquote(Ast.var(name)))
+            end
+          ]
 
         :update ->
-          quote do
-            {:ok, unquote(Ast.var(name))} <-
-              lookup(
-                conn,
-                unquote(to_string(name)),
-                unquote(target[:api_module]),
-                {:relation, unquote(e[:api_module]), unquote(Ast.var(e)), unquote(name)}
-              )
-          end
+          [
+            quote do
+              {:ok, unquote(Ast.var(name))} <-
+                lookup(
+                  conn,
+                  unquote(to_string(name)),
+                  unquote(target[:api_module]),
+                  {:relation, unquote(e[:api_module]), unquote(Ast.var(e)), unquote(name)}
+                )
+            end,
+            quote do
+              conn <- assign(conn, unquote(name), unquote(Ast.var(name)))
+            end
+          ]
       end
     end)
   end
@@ -666,7 +683,7 @@ defmodule Graphism.Rest do
     |> Entity.parent_relations()
     |> Enum.filter(&Entity.computed?/1)
     |> Enum.filter(&Entity.ancestor?/1)
-    |> Enum.map(fn rel ->
+    |> Enum.flat_map(fn rel ->
       name = rel[:name]
 
       [parent_rel_name, ancestor_rel_name] = Entity.computed_relation_path(rel)
@@ -674,14 +691,19 @@ defmodule Graphism.Rest do
       parent_rel = Entity.relation!(e, parent_rel_name)
       api_module = Entity.find_entity!(schema, parent_rel[:target])[:api_module]
 
-      quote do
-        {:ok, unquote(Ast.var(name))} <-
-          lookup_relation(
-            unquote(api_module),
-            unquote(Ast.var(parent_rel_name)),
-            unquote(ancestor_rel_name)
-          )
-      end
+      [
+        quote do
+          {:ok, unquote(Ast.var(name))} <-
+            lookup_relation(
+              unquote(api_module),
+              unquote(Ast.var(parent_rel_name)),
+              unquote(ancestor_rel_name)
+            )
+        end,
+        quote do
+          conn <- assign(conn, unquote(name), unquote(Ast.var(name)))
+        end
+      ]
     end)
   end
 
@@ -689,13 +711,18 @@ defmodule Graphism.Rest do
     e
     |> Entity.parent_relations()
     |> Enum.filter(fn rel -> rel[:opts][:from_context] end)
-    |> Enum.map(fn rel ->
+    |> Enum.flat_map(fn rel ->
       name = rel[:name]
       from = rel[:opts][:from_context]
 
-      quote do
-        {:ok, unquote(Ast.var(name))} <- lookup_context(conn.assigns, unquote(from))
-      end
+      [
+        quote do
+          {:ok, unquote(Ast.var(name))} <- lookup_context(conn.assigns, unquote(from))
+        end,
+        quote do
+          conn <- assign(conn, unquote(name), unquote(Ast.var(name)))
+        end
+      ]
     end)
   end
 
@@ -703,13 +730,18 @@ defmodule Graphism.Rest do
     e
     |> Entity.parent_relations()
     |> Enum.filter(fn rel -> rel[:opts][:using] end)
-    |> Enum.map(fn rel ->
+    |> Enum.flat_map(fn rel ->
       name = rel[:name]
       mod = rel[:opts][:using]
 
-      quote do
-        {:ok, unquote(Ast.var(name))} <- unquote(mod).execute(conn.assigns)
-      end
+      [
+        quote do
+          {:ok, unquote(Ast.var(name))} <- unquote(mod).execute(conn.assigns)
+        end,
+        quote do
+          conn <- assign(conn, unquote(name), unquote(Ast.var(name)))
+        end
+      ]
     end)
   end
 

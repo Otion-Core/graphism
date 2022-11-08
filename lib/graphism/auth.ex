@@ -37,11 +37,14 @@ defmodule Graphism.Auth do
       policies = Keyword.fetch!(opts, :policies)
       policies = resolve_scopes(policies, scopes)
 
+      relations = e |> Entity.relations() |> Entity.names()
+      paths = [e[:name] | relations]
+
       quote do
         def allow?(unquote(e[:name]), unquote(action), args, context) do
           context
           |> roles()
-          |> policy_allow?(unquote(Macro.escape(policies)), unquote(default_policy), args, context, unquote(e[:name]))
+          |> policy_allow?(unquote(Macro.escape(policies)), unquote(default_policy), args, context, unquote(paths))
         end
       end
     end
@@ -106,36 +109,54 @@ defmodule Graphism.Auth do
         default_policy == :allow
       end
 
-      defp policy_allow?(roles, policies, default_policy, args, context, entity) do
+      defp policy_allow?(roles, policies, default_policy, args, context, paths) do
         case policy_from_roles(roles, policies) do
           [] -> default_policy == :allow
-          policy -> do_policy_allow?(policy, args, context, entity)
+          policy -> do_policy_allow?(policy, args, context, paths)
         end
       end
 
-      defp do_policy_allow?(%{any: policies}, args, context, entity) do
+      defp do_policy_allow?(%{any: policies}, args, context, paths) do
         Enum.reduce_while(policies, false, fn policy, _ ->
-          case do_policy_allow?(policy, args, context, entity) do
+          case do_policy_allow?(policy, args, context, paths) do
             true -> {:halt, true}
             false -> {:cont, false}
           end
         end)
       end
 
-      defp do_policy_allow?(%{all: policies}, args, context, entity) do
+      defp do_policy_allow?(%{all: policies}, args, context, paths) do
         Enum.reduce_while(policies, false, fn policy, _ ->
-          case do_policy_allow?(policy, args, context, entity) do
+          case do_policy_allow?(policy, args, context, paths) do
             true -> {:cont, true}
             false -> {:halt, false}
           end
         end)
       end
 
-      defp do_policy_allow?({policy, %{prop: prop_spec, value: value_spec, op: op}}, args, context, entity) do
+      defp do_policy_allow?({policy, %{prop: prop_spec, value: value_spec, op: op}}, args, context, paths) do
         context = Map.put(context, :args, args)
-        prop = context |> Map.get(entity, context) |> evaluate(prop_spec)
+
+        prop =
+          Enum.reduce_while(paths, nil, fn path, _ ->
+            case context |> Map.get(path) |> evaluate(prop_spec) do
+              nil -> {:cont, nil}
+              value -> {:halt, value}
+            end
+          end)
+
         value = evaluate(context, value_spec)
         result = compare(prop, value, op)
+
+        # IO.inspect(
+        #  paths: paths,
+        #  context: context,
+        #  prop_spec: prop_spec,
+        #  prop: prop,
+        #  value_spec: value_spec,
+        #  value: value,
+        #  result: result
+        # )
 
         with true <- result, do: policy == :allow
       end
