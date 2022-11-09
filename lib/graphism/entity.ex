@@ -950,7 +950,14 @@ defmodule Graphism.Entity do
   def entity_policies({:__block__, _, spec}) do
     spec
     |> Enum.filter(fn {policy, _, _} -> policy in [:allow, :deny] end)
-    |> Enum.map(fn {policy, _, [[do: {:__block__, _, actions}]]} ->
+    |> Enum.map(fn
+      {policy, _, [[do: {kind, _, [role, {:scope, _, [scope]}]}]]} ->
+        {kind, {policy, role, scope}}
+
+      {policy, _, [[do: {kind, _, [role]}]]} ->
+        {kind, {policy, role, :any}}
+
+      {policy, _, [[do: {:__block__, _, actions}]]} ->
       Enum.map(actions, fn
         {kind, _, [role, {:scope, _, [scope]}]} ->
           {kind, {policy, role, scope}}
