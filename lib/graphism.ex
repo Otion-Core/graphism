@@ -356,7 +356,13 @@ defmodule Graphism do
   defmacro action(_name, _opts \\ []) do
   end
 
+  defmacro action(_name, _opts, _block) do
+  end
+
   defmacro list(_name, _opts \\ []) do
+  end
+
+  defmacro list(_name, _opts, _block) do
   end
 
   defmacro data(name, value) do

@@ -905,16 +905,16 @@ defmodule Graphism.Entity do
     end
   end
 
-  def with_action_kind(opts, name) when name in [:create, :update, :delete] do
-    Keyword.put(opts, :kind, [:write])
-  end
-
   def with_action_kind(opts, name) when name in [:list] do
     Keyword.put(opts, :kind, [:read, :list])
   end
 
   def with_action_kind(opts, name) when name in [:read] do
     Keyword.put(opts, :kind, [:read])
+  end
+
+  def with_action_kind(opts, _) do
+    Keyword.put(opts, :kind, [:write])
   end
 
   def with_action_policies(opts) do
