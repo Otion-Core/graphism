@@ -994,6 +994,10 @@ defmodule Graphism.Entity do
     do: action_from(name, opts, entity_name)
 
   def action_from({:action, _, [name]}, entity_name), do: action_from(name, [], entity_name)
+  def action_from({:action, _, [name, opts, block]}, entity_name) do
+    action_from(name, Keyword.merge(opts, block), entity_name)
+  end
+
   def action_from(_, _), do: nil
 
   def action_from(name, opts, entity_name) do
