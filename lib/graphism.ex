@@ -147,12 +147,9 @@ defmodule Graphism do
 
     schema = Enum.reverse(schema)
 
-    schema
-    |> Enum.each(fn e ->
-      if Enum.empty?(e[:attributes]) and
-           Enum.empty?(e[:relations]) do
-        raise "Entity #{e[:name]} is empty"
-      end
+    Enum.each(schema, fn e ->
+      Entity.ensure_not_empty!(e)
+      Entity.ensure_action_scopes!(e, scopes)
     end)
 
     enums_fun =

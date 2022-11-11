@@ -3,6 +3,29 @@ defmodule Graphism.Entity do
 
   alias Graphism.{Ast, Hooks}
 
+  def ensure_not_empty!(e) do
+    if Enum.empty?(e[:attributes]) and
+         Enum.empty?(e[:relations]) do
+      raise "Entity #{e[:name]} is empty"
+    end
+  end
+
+  def ensure_action_scopes!(e, scopes) do
+    Enum.each(e[:actions] ++ e[:custom_actions], fn {name, opts} ->
+      Enum.each(opts[:policies] || [], fn
+        {policy, role, scope} ->
+          unless Map.has_key?(scopes, scope) do
+            raise "action #{inspect(name)} of entity #{inspect(e[:name])}, for role #{inspect(role)} and policy
+      #{inspect(policy)}, has scope #{inspect(scope)} but this scope is undefined. Did you mean one of:
+      #{inspect(Map.keys(scopes))}?"
+          end
+
+        _ ->
+          :ok
+      end)
+    end)
+  end
+
   def action_for(e, action) do
     (e[:actions] ++ e[:custom_actions])
     |> Enum.filter(fn {name, _} ->
@@ -958,13 +981,13 @@ defmodule Graphism.Entity do
         {kind, {policy, role, :any}}
 
       {policy, _, [[do: {:__block__, _, actions}]]} ->
-      Enum.map(actions, fn
-        {kind, _, [role, {:scope, _, [scope]}]} ->
-          {kind, {policy, role, scope}}
+        Enum.map(actions, fn
+          {kind, _, [role, {:scope, _, [scope]}]} ->
+            {kind, {policy, role, scope}}
 
-        {kind, _, [role]} ->
-          {kind, {policy, role, :any}}
-      end)
+          {kind, _, [role]} ->
+            {kind, {policy, role, :any}}
+        end)
     end)
     |> List.flatten()
     |> Enum.reduce([], fn {kind, policy}, acc ->
@@ -994,6 +1017,7 @@ defmodule Graphism.Entity do
     do: action_from(name, opts, entity_name)
 
   def action_from({:action, _, [name]}, entity_name), do: action_from(name, [], entity_name)
+
   def action_from({:action, _, [name, opts, block]}, entity_name) do
     action_from(name, Keyword.merge(opts, block), entity_name)
   end
