@@ -282,7 +282,7 @@ defmodule Graphism.Graphql do
 
   defp multiple_graphql_queries(e, schema) do
     queries =
-      if Entity.action?(e, :list) do
+      Entity.with_action(e, :list, fn _ ->
         [
           graphql_query_list_all(e, schema),
           graphql_query_aggregate_all(e, schema),
@@ -291,9 +291,7 @@ defmodule Graphism.Graphql do
           graphql_list_by_non_unique_key_queries(e, schema),
           graphql_aggregate_by_non_unique_key_queries(e, schema)
         ]
-      else
-        []
-      end
+      end) || []
 
     case queries ++ graphql_multiple_results_custom_queries(e) do
       [] ->

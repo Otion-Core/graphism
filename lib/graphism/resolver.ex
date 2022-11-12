@@ -544,7 +544,7 @@ defmodule Graphism.Resolver do
 
           [
             quote do
-              {:ok, unquote(Ast.var(attr))} <- unquote(mod).execute(context)
+              {:ok, unquote(Ast.var(attr))} <- unquote(mod).execute(unquote(Ast.var(:args)), context)
             end,
             quote do
               unquote(Ast.var(:args)) <-
@@ -592,7 +592,7 @@ defmodule Graphism.Resolver do
               mod = rel[:opts][:using]
 
               quote do
-                {:ok, unquote(Ast.var(rel))} <- unquote(mod).execute(context)
+                {:ok, unquote(Ast.var(rel))} <- unquote(mod).execute(args, context)
               end
 
             rel[:opts][:from] != nil ->
@@ -1040,7 +1040,7 @@ defmodule Graphism.Resolver do
   end
 
   defp with_entity_funs(funs, e, action, fun) do
-    case Entity.action?(e, action) do
+    case Entity.action?(e, action) && !Entity.custom_action?(e, action) do
       true ->
         case fun.() do
           [_ | _] = more_funs ->

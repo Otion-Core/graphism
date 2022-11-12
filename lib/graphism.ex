@@ -306,7 +306,7 @@ defmodule Graphism do
     lists = Entity.lists_from(block, name)
     keys = Entity.keys_from(block)
 
-    {actions, custom_actions} = Entity.split_actions(actions)
+    {actions, custom_actions} = Entity.split_actions(opts, actions)
     custom_actions = custom_actions ++ lists
 
     entity =
@@ -352,6 +352,9 @@ defmodule Graphism do
   end
 
   defmacro action(_name, _opts \\ []) do
+  end
+
+  defmacro custom(_name) do
   end
 
   defmacro action(_name, _opts, _block) do

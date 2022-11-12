@@ -86,7 +86,14 @@ defmodule Graphism.Entity do
     Enum.reject(e[:actions], &action_of_kind?(&1, :list))
   end
 
-  defp action_of_kind?({_, opts}, kind), do: kind in (opts[:kind] || [])
+  def custom_action?(e, name) do
+    e
+    |> find_action(name)
+    |> action_of_kind?(:custom)
+  end
+
+  defp action_of_kind?({_, opts}, kind), do: action_of_kind?(opts, kind)
+  defp action_of_kind?(opts, kind), do: kind in (opts[:kind] || [])
 
   def virtual?(e), do: modifier?(e, :virtual)
   def client_ids?(e), do: modifier?(e, :client_ids)
@@ -112,7 +119,7 @@ defmodule Graphism.Entity do
   def has_default?(attr), do: Keyword.has_key?(attr[:opts], :default)
 
   defp modifier?(any, modifier), do: any |> modifiers() |> Enum.member?(modifier)
-  defp modifiers(any), do: any[:opts][:modifiers] || []
+  defp modifiers(any), do: any[:opts][:modifiers] || any[:modifiers] || []
 
   def relation?(e, name), do: field?(e[:relations], name)
   def attribute?(e, name), do: field?(e[:attributes], name)
@@ -302,16 +309,12 @@ defmodule Graphism.Entity do
   end
 
   def custom_mutations(e) do
-    Enum.filter(e[:custom_actions], &custom_mutation?/1)
+    Enum.filter(e[:custom_actions], &action_of_kind?(&1, :write))
   end
 
   def custom_queries(e) do
-    Enum.filter(e[:custom_actions], &custom_query?/1)
+    Enum.filter(e[:custom_actions], &(action_of_kind?(&1, :read) and not action_of_kind?(&1, :custom)))
   end
-
-  defp custom_mutation?({_name, opts}), do: :mutation == custom_action_kind(opts)
-  defp custom_query?({_name, opts}), do: :query == custom_action_kind(opts)
-  defp custom_action_kind(opts), do: Keyword.get(opts, :kind, :mutation)
 
   def produces_single_result?(action), do: !produces_multiple_results?(action)
   def produces_multiple_results?({_name, opts}), do: match?({:list, _}, opts[:produces])
@@ -456,12 +459,11 @@ defmodule Graphism.Entity do
   end
 
   def with_action(e, action, next) do
-    case action_for(e, action) do
-      nil ->
-        nil
-
-      opts ->
-        next.(opts)
+    with opts when opts != nil <- action_for(e, action),
+         false <- action_of_kind?(opts, :custom) do
+      next.(opts)
+    else
+      _ -> nil
     end
   end
 
@@ -664,10 +666,14 @@ defmodule Graphism.Entity do
     entity
   end
 
-  def split_actions(all) do
-    Enum.split_with(all, fn {name, _} ->
-      built_in_action?(name)
-    end)
+  def split_actions(opts, all) do
+    if virtual?(opts) do
+      {[], all}
+    else
+      Enum.split_with(all, fn {name, _} ->
+        built_in_action?(name)
+      end)
+    end
   end
 
   @built_in_actions [:read, :list, :create, :update, :delete]
@@ -941,6 +947,27 @@ defmodule Graphism.Entity do
     Keyword.put(opts, :kind, [:write])
   end
 
+  defp maybe_custom_action(opts) do
+    if in_block?(opts[:do], &custom?/1) do
+      kind = opts[:kind]
+      Keyword.put(opts, :kind, [:custom | kind])
+    else
+      opts
+    end
+  end
+
+  defp in_block?({:__block__, [], items}, fun) when is_list(items) do
+    items
+    |> Enum.filter(fun)
+    |> List.first()
+  end
+
+  defp in_block?({:__block__, [], item}, fun), do: fun.(item)
+  defp in_block?(_, _), do: false
+
+  defp custom?({:custom, _, _}), do: true
+  defp custom?(_), do: false
+
   def with_action_policies(opts) do
     case opts[:do] do
       nil ->
@@ -1029,6 +1056,7 @@ defmodule Graphism.Entity do
     opts =
       opts
       |> with_action_kind(name)
+      |> maybe_custom_action()
       |> with_action_hook(:using)
       |> with_action_hook(:before)
       |> with_action_hook(:after)
