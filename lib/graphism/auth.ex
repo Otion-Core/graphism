@@ -80,15 +80,15 @@ defmodule Graphism.Auth do
     end
   end
 
-  defp resolve_scope([all: list], scopes) when is_list(list) do
+  defp resolve_scope(%{all: list}, scopes) when is_list(list) do
     %{all: Enum.map(list, &resolve_scope(&1, scopes))}
   end
 
-  defp resolve_scope([any: list], scopes) when is_list(list) do
+  defp resolve_scope(%{any: list}, scopes) when is_list(list) do
     %{any: Enum.map(list, &resolve_scope(&1, scopes))}
   end
 
-  defp resolve_scope(%{name: _, op: _, prop: _, value: _} = scope, _), do: scope
+  defp resolve_scope(%{op: _, prop: _, value: _} = scope, _), do: scope
 
   defp default_allow_fun(entity, action) do
     quote do

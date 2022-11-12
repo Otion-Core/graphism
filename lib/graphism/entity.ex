@@ -1,7 +1,7 @@
 defmodule Graphism.Entity do
   @moduledoc "Entity helpers"
 
-  alias Graphism.{Ast, Hooks}
+  alias Graphism.{Ast, Hooks, Policy}
 
   def ensure_not_empty!(e) do
     if Enum.empty?(e[:attributes]) and
@@ -13,11 +13,12 @@ defmodule Graphism.Entity do
   def ensure_action_scopes!(e, scopes) do
     Enum.each(e[:actions] ++ e[:custom_actions], fn {name, opts} ->
       Enum.each(opts[:policies] || [], fn
-        {policy, role, scope} ->
-          unless Map.has_key?(scopes, scope) do
-            raise "action #{inspect(name)} of entity #{inspect(e[:name])}, for role #{inspect(role)} and policy
-      #{inspect(policy)}, has scope #{inspect(scope)} but this scope is undefined. Did you mean one of:
-      #{inspect(Map.keys(scopes))}?"
+        {_policy, _role, :any} ->
+          :ok
+
+        {_policy, _role, scope} ->
+          unless Policy.scope?(scopes, scope) do
+            raise "undefined scope #{inspect(scope)} for action #{inspect(name)} of entity #{inspect(e[:name])}. Did you mean one of: #{inspect(Map.keys(scopes))}?"
           end
 
         _ ->

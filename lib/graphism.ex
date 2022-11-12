@@ -122,6 +122,7 @@ defmodule Graphism do
       caller_module
       |> Module.get_attribute(:scope)
       |> index_by(:name)
+      |> Policy.resolve_scopes()
 
     default_policy = Module.get_attribute(caller_module, :default_policy)
 
@@ -433,11 +434,7 @@ defmodule Graphism do
   end
 
   defmacro scope(name, block) do
-    scope =
-      block
-      |> Policy.scope_from()
-      |> Policy.with_name(name)
-
+    scope = Policy.scope_from(name, block)
     Module.put_attribute(__CALLER__.module, :scope, scope)
   end
 
