@@ -313,7 +313,7 @@ defmodule Graphism.Entity do
   end
 
   def custom_queries(e) do
-    Enum.filter(e[:custom_actions], &(action_of_kind?(&1, :read) and not action_of_kind?(&1, :custom)))
+    Enum.filter(e[:custom_actions], &(action_of_kind?(&1, :read) && !action_of_kind?(&1, :custom)))
   end
 
   def produces_single_result?(action), do: !produces_multiple_results?(action)
@@ -920,11 +920,13 @@ defmodule Graphism.Entity do
   end
 
   def with_action_args(opts, _entity_name) do
-    if opts[:produces] && !opts[:args] do
+    args  = opts[:args] || []
+
+    if opts[:produces] && Enum.empty?(args) && !action_of_kind?(opts, :list) do
       Keyword.put(opts, :args, [:id])
     else
       args =
-        Enum.map(opts[:args], fn
+        Enum.map(args, fn
           {name, {:{}, _, [:list, kind, :optional]}} -> {name, {:list, kind, :optional}}
           {name, {:{}, _, [:list, kind]}} -> {name, {:list, kind}}
           {name, kind} -> {name, kind}
@@ -936,15 +938,15 @@ defmodule Graphism.Entity do
   end
 
   def with_action_kind(opts, name) when name in [:list] do
-    Keyword.put(opts, :kind, [:read, :list])
+    Keyword.put_new(opts, :kind, [:read, :list])
   end
 
   def with_action_kind(opts, name) when name in [:read] do
-    Keyword.put(opts, :kind, [:read])
+    Keyword.put_new(opts, :kind, [:read])
   end
 
   def with_action_kind(opts, _) do
-    Keyword.put(opts, :kind, [:write])
+    Keyword.put_new(opts, :kind, [:write])
   end
 
   defp maybe_custom_action(opts) do
@@ -1125,8 +1127,10 @@ defmodule Graphism.Entity do
   def list_from(_, _), do: nil
 
   def list_from(name, opts, entity_name) do
+    opts = (opts || [])
+      |> Keyword.put(:kind, [:query, :read, :list])
+      |> Keyword.put(:produces, {:list, entity_name})
+
     action_from(name, opts, entity_name)
-    |> put_in([:opts, :kind], [:query, :read, :list])
-    |> put_in([:opts, :produces], {:list, entity_name})
   end
 end

@@ -60,7 +60,7 @@ defmodule Graphism.Resolver do
   end
 
   defp resolver_list_auth_funs(e, schema, auth_module) do
-    e[:actions]
+    (e[:actions] ++ e[:custom_actions])
     |> Enum.filter(fn {action, _opts} -> action == :list end)
     |> Enum.flat_map(fn {_, opts} ->
       [
