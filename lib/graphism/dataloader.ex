@@ -54,19 +54,9 @@ defmodule Graphism.Dataloader do
             Enum.map(to_query, fn {{m, f} = key, ids} ->
               api = Module.concat([m, Api])
 
-              context =
-                Map.put(contet, :graphism, %{
-                  entity: m.entity(),
-                  action: :read,
-                  schema: m
-                })
-
               case apply(api, f, [ids, context]) do
-                {:ok, items} ->
-                  {key, items}
-
-                _ ->
-                  {key, []}
+                {:ok, items} -> {key, items}
+                _ -> {key, []}
               end
             end)
 

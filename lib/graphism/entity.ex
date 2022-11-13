@@ -79,11 +79,11 @@ defmodule Graphism.Entity do
   end
 
   def list_actions(e) do
-    Enum.filter(e[:actions], &action_of_kind?(&1, :list))
+    Enum.filter(e[:actions] ++ e[:custom_actions], &action_of_kind?(&1, :list))
   end
 
   def non_list_actions(e) do
-    Enum.reject(e[:actions], &action_of_kind?(&1, :list))
+    Enum.reject(e[:actions] ++ e[:custom_actions], &action_of_kind?(&1, :list))
   end
 
   def custom_action?(e, name) do
@@ -1110,11 +1110,23 @@ defmodule Graphism.Entity do
     do: list_from(name, opts, entity_name)
 
   def list_from({:list, _, [name]}, entity_name), do: list_from(name, [], entity_name)
+
+  def list_from({:list, _, [name, opts, block]}, entity_name) do
+    policies =
+      block
+      |> with_action_policies()
+      |> Keyword.fetch!(:policies)
+
+    name
+    |> list_from(opts, entity_name)
+    |> put_in([:opts, :policies], policies)
+  end
+
   def list_from(_, _), do: nil
 
   def list_from(name, opts, entity_name) do
     action_from(name, opts, entity_name)
-    |> put_in([:opts, :kind], :query)
+    |> put_in([:opts, :kind], [:query, :read, :list])
     |> put_in([:opts, :produces], {:list, entity_name})
   end
 end

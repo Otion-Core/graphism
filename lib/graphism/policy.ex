@@ -59,12 +59,19 @@ defmodule Graphism.Policy do
 
   defp expression(name) when is_atom(name), do: name
 
-  defp value({:env, _, [{:__aliases__, _, env}, key]}) do
-    %{env: Module.concat(env), key: key}
+  defp value({:env, _, [app, {:__aliases__, _, env}, key]}) do
+    %{app: app, env: Module.concat(env), key: key}
   end
+
+  defp value(v) when is_boolean(v), do: {:literal, v}
+  defp value({:literal, _, [v]}), do: {:literal, v}
 
   defp value(v) when is_binary(v) do
     split(v)
+  end
+
+  defp value([v|_] = values) when is_binary(v) do
+    Enum.map(values, &value/1)
   end
 
   defp value(other), do: other

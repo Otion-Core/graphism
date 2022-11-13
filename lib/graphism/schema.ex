@@ -233,7 +233,7 @@ defmodule Graphism.Schema do
             |> Enum.map(fn rel ->
               from_entity = rel[:from][:name]
               from_table = rel[:from][:table]
-              name = "#{from_table}_#{e[:name]}_id_fkey"
+              name = "#{from_table}_#{rel[:name]}_id_fkey"
               message = "not empty"
 
               quote do

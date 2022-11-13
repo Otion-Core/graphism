@@ -13,11 +13,11 @@ defmodule Graphism.Auth do
       policy_from_roles_fun(),
       non_list_actions_allow_funs(schema, scopes, default_policy),
       list_actions_allow_funs(schema, scopes, default_policy),
-      default_allow_fun(),
       policy_allow_fun(),
       role_allow_fun(),
       import_ecto_query(),
       scope_fun(schema, scopes, default_policy),
+      default_scope_fun(),
       scope_helper_fun()
     ]
     |> Enum.reject(&is_nil/1)
@@ -90,19 +90,6 @@ defmodule Graphism.Auth do
 
   defp resolve_scope(%{op: _, prop: _, value: _} = scope, _), do: scope
 
-  defp default_allow_fun(entity, action) do
-    quote do
-      def allow?(_args, %{graphism: %{entity: unquote(entity), action: unquote(action)}}),
-        do: true
-    end
-  end
-
-  defp default_allow_fun do
-    quote do
-      def allow?(_args, _context), do: true
-    end
-  end
-
   defp policy_allow_fun do
     quote do
       defp policy_allow?(roles, _, default_policy, _, _, _) when is_nil(roles) or roles == [] do
@@ -134,21 +121,26 @@ defmodule Graphism.Auth do
         end)
       end
 
-      defp do_policy_allow?({policy, %{prop: prop_spec, value: value_spec, op: op}}, args, context, paths) do
+      defp do_policy_allow?(%{prop: prop_spec, value: value_spec, op: op}, args, context, paths) do
         context = Map.put(context, :args, args)
 
         prop =
-          Enum.reduce_while(paths, nil, fn path, _ ->
+          paths
+          |> Enum.reduce_while(nil, fn path, _ ->
             case context |> Map.get(path) |> evaluate(prop_spec) do
               nil -> {:cont, nil}
               value -> {:halt, value}
             end
           end)
+          |> case do
+            nil -> evaluate(context, prop_spec)
+            prop -> prop
+          end
 
         value = evaluate(context, value_spec)
         result = compare(prop, value, op)
 
-        # IO.inspect(
+        #IO.inspect(
         #  paths: paths,
         #  context: context,
         #  prop_spec: prop_spec,
@@ -156,9 +148,15 @@ defmodule Graphism.Auth do
         #  value_spec: value_spec,
         #  value: value,
         #  result: result
-        # )
+        #)
 
-        with true <- result, do: policy == :allow
+        result
+      end
+
+      defp do_policy_allow?({policy, scopes}, args, context, paths) do
+        with true <- do_policy_allow?(scopes, args, context, paths) do
+          policy == :allow
+        end
       end
 
       defp do_policy_allow?(:allow, _, _, _), do: true
@@ -196,7 +194,7 @@ defmodule Graphism.Auth do
   end
 
   defp scope_fun(schema, scopes, _default_policy) do
-    for e <- schema, {action, opts} <- e[:actions] do
+    for e <- schema, {action, opts} <- Entity.list_actions(e) do
       policies = Keyword.fetch!(opts, :policies)
       policies = resolve_scopes(policies, scopes)
 
@@ -210,9 +208,17 @@ defmodule Graphism.Auth do
     end
   end
 
+  defp default_scope_fun do
+    quote do
+      def scope(_entity, _action, q, _) do
+        return_nothing(q)
+      end
+    end
+  end
+
   defp scope_helper_fun do
     quote do
-      defp do_scope(policy, _, q, _, _, _) when is_nil(policy) or policy == [], do: return_nothing(q)
+      defp do_scope(roles, _, q, _, _, _) when is_nil(roles) or roles == [], do: return_nothing(q)
 
       defp do_scope(roles, policies, q, entity, schema, context) do
         roles
@@ -220,20 +226,34 @@ defmodule Graphism.Auth do
         |> do_scope(q, entity, schema, context)
       end
 
-      defp do_scope(%{any: policies}, q, entity, schema, context) do
-        scope_all(policies, q, entity, schema, context, :insersect)
-      end
-
-      defp do_scope(%{all: policies}, q, entity, schema, context) do
+      defp do_scope({:allow, %{any: policies}}, q, entity, schema, context) do
         scope_all(policies, q, entity, schema, context, :union)
       end
 
-      defp do_scope({:allow, %{prop: prop, value: value, op: op}}, q, entity, schema, context) do
-        value = evaluate(context, value) |> maybe_ids()
+      defp do_scope({:allow, %{all: policies}}, q, entity, schema, context) do
+        scope_all(policies, q, entity, schema, context, :intersect)
+      end
+
+      defp do_scope({:allow, policy}, q, entity, schema, context) do
+        do_scope(policy, q, entity, schema, context)
+      end
+
+      defp do_scope(%{any: policies}, q, entity, schema, context) do
+        scope_all(policies, q, entity, schema, context, :union)
+      end
+
+      defp do_scope(%{all: policies}, q, entity, schema, context) do
+        scope_all(policies, q, entity, schema, context, :intersect)
+      end
+
+      defp do_scope(%{prop: prop, value: value_spec, op: op}, q, entity, schema, context) do
+        value = evaluate(context, value_spec) |> maybe_ids()
 
         filter(schema, prop, op, value, q, entity)
       end
 
+      defp do_scope(nil, q, _, _, _), do: return_nothing(q)
+      defp do_scope([], q, _, _, _), do: return_nothing(q)
       defp do_scope(:deny, q, _, _, _), do: return_nothing(q)
       defp do_scope(:allow, q, _, _, _), do: q
 
@@ -259,19 +279,6 @@ defmodule Graphism.Auth do
       defp combine_queries(q, prev, :intersect), do: Ecto.Query.intersect(q, ^prev)
     end
   end
-
-  defp default_scope_fun(entity, action) do
-    quote do
-      def scope(q, %{graphism: %{entity: unquote(entity), action: unquote(action)}}),
-        do: q
-    end
-  end
-
-  # defp default_scope_fun do
-  #  quote do
-  #    def scope(q, _context), do: q
-  #  end
-  # end
 
   defp policy_from_roles_fun do
     quote do

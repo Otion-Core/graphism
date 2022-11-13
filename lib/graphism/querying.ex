@@ -121,6 +121,12 @@ defmodule Graphism.Querying do
       def evaluate(nil, _), do: nil
       def evaluate(value, []), do: value
 
+      def evaluate(_, %{app: app, env: env, key: key}) do
+        app |> Application.fetch_env!(env) |> Keyword.fetch!(key)
+      end
+
+      def evaluate(_, {:literal, v}), do: v
+
       def evaluate(%{__struct__: _} = context, [:"**"]), do: context
 
       def evaluate(%{__struct__: schema} = context, [field]) when is_atom(field) do
@@ -159,7 +165,7 @@ defmodule Graphism.Querying do
         end
       end
 
-      def evaluate(%{__struct__: _} = context, [field | _] = paths) when is_list(field) do
+      def evaluate(context, [field | _] = paths) when is_map(context) and is_list(field) do
         paths
         |> Enum.map(&evaluate(context, &1))
         |> List.flatten()
@@ -190,8 +196,8 @@ defmodule Graphism.Querying do
         end
       end
 
-      def evaluate(map, [field | rest]) when is_map(map) do
-        map
+      def evaluate(context, [field | rest]) when is_map(context) and is_atom(field) do
+        context
         |> Map.get(field)
         |> evaluate(rest)
       end
