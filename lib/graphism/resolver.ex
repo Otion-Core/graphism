@@ -7,18 +7,24 @@ defmodule Graphism.Resolver do
     api_module = Keyword.fetch!(e, :api_module)
 
     resolver_funs =
-      []
-      |> with_resolver_pagination_fun()
-      |> with_resolver_auth_funs(e, schema, auth_module)
-      |> with_resolver_inlined_relations_funs(e, schema, api_module)
-      |> with_resolver_list_funs(e, schema, api_module)
-      |> with_resolver_aggregate_funs(e, schema, api_module)
-      |> with_resolver_read_funs(e, schema, api_module)
-      |> with_resolver_create_fun(e, schema, api_module, repo_module)
-      |> with_resolver_update_fun(e, schema, api_module, repo_module)
-      |> with_resolver_delete_fun(e, schema, api_module)
-      |> with_resolver_custom_funs(e, schema, api_module)
-      |> List.flatten()
+      if Entity.virtual?(e) do
+        []
+        |> with_resolver_auth_funs(e, schema, auth_module)
+        |> with_virtual_resolver_custom_funs(e, schema, api_module)
+      else
+        []
+        |> with_resolver_pagination_fun()
+        |> with_resolver_auth_funs(e, schema, auth_module)
+        |> with_resolver_inlined_relations_funs(e, schema, api_module)
+        |> with_resolver_list_funs(e, schema, api_module)
+        |> with_resolver_aggregate_funs(e, schema, api_module)
+        |> with_resolver_read_funs(e, schema, api_module)
+        |> with_resolver_create_fun(e, schema, api_module, repo_module)
+        |> with_resolver_update_fun(e, schema, api_module, repo_module)
+        |> with_resolver_delete_fun(e, schema, api_module)
+        |> with_resolver_custom_funs(e, schema, api_module)
+        |> List.flatten()
+      end
 
     quote do
       defmodule unquote(e[:resolver_module]) do
@@ -898,6 +904,14 @@ defmodule Graphism.Resolver do
       end)
 
     custom_queries_funs ++ custom_mutations_funs ++ funs
+  end
+
+  defp with_virtual_resolver_custom_funs(funs, e, schema, api_module) do
+    actions = e[:actions] ++ e[:custom_actions]
+
+    Enum.map(actions, fn {name, action_opts} ->
+      resolver_custom_mutation_fun(e, name, action_opts, api_module, schema)
+    end) ++ funs
   end
 
   defp context_with_pagination_invocation do

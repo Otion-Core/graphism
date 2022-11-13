@@ -36,17 +36,10 @@ defmodule Graphism.Api do
         end
 
       true ->
-        actions = e[:actions]
-        custom_actions = e[:custom_actions]
-
-        e =
-          e
-          |> Keyword.put(:custom_actions, Keyword.merge(custom_actions, actions))
-          |> Keyword.put(:actions, [])
 
         api_funs =
-          []
-          |> with_api_custom_funs(e, schema_module, repo_module, schema, auth_module)
+          e
+          |> with_virtual_api_custom_funs()
           |> List.flatten()
 
         quote do
@@ -730,6 +723,7 @@ defmodule Graphism.Api do
   end
 
   defp with_api_custom_funs(funs, e, schema_module, repo_module, schema, auth_module) do
+
     custom_action_funs =
       e
       |> Entity.custom_mutations()
@@ -749,6 +743,15 @@ defmodule Graphism.Api do
 
     funs ++ custom_action_funs ++ custom_list_funs
   end
+
+  defp with_virtual_api_custom_funs(e) do
+    actions = e[:actions] ++ e[:custom_actions]
+
+    Enum.map(actions, fn {action, action_opts} ->
+      api_custom_action_fun(e, action, action_opts)
+    end)
+  end
+
 
   defp api_custom_action_fun(e, action, opts) do
     using_mod = opts[:using]
