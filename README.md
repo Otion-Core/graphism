@@ -233,6 +233,20 @@ entity :post do
 end
 ```
 
+### Slugs
+
+Slugs are a special type of convenience, computed attribures:
+
+```elixir
+entity :post do
+  string(:title)
+  slug(:title)
+  ...
+```
+
+This will automatically create a `:slug` attribute, that will be unique, and that will store a slug of the `:title` field.
+
+
 ### Self referencing entities
 
 Sometimes it is useful to have schemas where an entity needs to reference itself, eg when building a tree-like structure:

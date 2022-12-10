@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+* Policies - [#131](https://github.com/Gravity-Core/graphism/pull/131)
+
 # 0.9.0 (October 30th, 2022)
 
 * Drop tables after indices - [#130](https://github.com/Gravity-Core/graphism/pull/130)

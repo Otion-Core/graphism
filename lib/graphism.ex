@@ -8,8 +8,8 @@ defmodule Graphism do
   """
 
   alias Graphism.{
-    Api,
-    Entity
+    Entity,
+    Policy
   }
 
   require Logger
@@ -17,12 +17,11 @@ defmodule Graphism do
   defmacro __using__(opts \\ []) do
     Code.compiler_options(ignore_module_conflict: true)
 
-    Module.register_attribute(__CALLER__.module, :data,
-      accumulate: true,
-      persist: true
-    )
+    repo = Keyword.fetch!(opts, :repo)
+    auth = opts[:auth]
+    styles = opts[:styles] || [:graphql]
 
-    Module.register_attribute(__CALLER__.module, :hooks,
+    Module.register_attribute(__CALLER__.module, :data,
       accumulate: true,
       persist: true
     )
@@ -32,58 +31,69 @@ defmodule Graphism do
       persist: true
     )
 
+    Module.register_attribute(__CALLER__.module, :scope,
+      accumulate: true,
+      persist: true
+    )
+
+    Module.register_attribute(__CALLER__.module, :default_policy,
+      accumulate: false,
+      persist: true
+    )
+
+    Module.register_attribute(__CALLER__.module, :role,
+      accumulate: false,
+      persist: true
+    )
+
     Module.register_attribute(__CALLER__.module, :schema_imports,
       accumulate: true,
       persist: true
     )
 
-    repo = opts[:repo]
-    styles = opts[:styles] || [:graphql]
+    Module.register_attribute(__CALLER__.module, :repo,
+      accumulate: false,
+      persist: true
+    )
 
-    if repo != nil do
-      Module.register_attribute(__CALLER__.module, :repo,
-        accumulate: false,
-        persist: true
-      )
+    Module.register_attribute(__CALLER__.module, :auth,
+      accumulate: false,
+      persist: true
+    )
 
-      Module.put_attribute(__CALLER__.module, :repo, repo)
-      Module.put_attribute(__CALLER__.module, :styles, styles)
+    Module.put_attribute(__CALLER__.module, :repo, repo)
+    Module.put_attribute(__CALLER__.module, :auth, auth)
+    Module.put_attribute(__CALLER__.module, :styles, styles)
 
-      middleware =
-        Enum.map(opts[:middleware] || [], fn {:__aliases__, _, mod} ->
-          Module.concat(mod)
-        end)
+    middleware =
+      Enum.map(opts[:middleware] || [], fn {:__aliases__, _, mod} ->
+        Module.concat(mod)
+      end)
 
-      quote do
-        import unquote(__MODULE__), only: :macros
-        @before_compile unquote(__MODULE__)
+    quote do
+      import unquote(__MODULE__), only: :macros
+      @before_compile unquote(__MODULE__)
 
-        unquote do
-          if Enum.member?(styles, :graphql) do
-            quote do
-              use Absinthe.Schema
-              import_types(Absinthe.Type.Custom)
-              import_types(Absinthe.Plug.Types)
-              import_types(Graphism.Type.Graphql.Json)
-              @middleware unquote(middleware)
+      unquote do
+        if Enum.member?(styles, :graphql) do
+          quote do
+            use Absinthe.Schema
+            import_types(Absinthe.Type.Custom)
+            import_types(Absinthe.Plug.Types)
+            import_types(Graphism.Type.Graphql.Json)
+            @middleware unquote(middleware)
 
-              def context(ctx), do: Map.put(ctx, :loader, __MODULE__.Dataloader.new())
+            def context(ctx), do: Map.put(ctx, :loader, __MODULE__.Dataloader.new())
 
-              def plugins do
-                @middleware ++ [__MODULE__.Dataloader.Absinthe] ++ Absinthe.Plugin.defaults()
-              end
+            def plugins do
+              @middleware ++ [__MODULE__.Dataloader.Absinthe] ++ Absinthe.Plugin.defaults()
+            end
 
-              def middleware(middleware, _field, _object) do
-                middleware ++ [Graphism.ErrorMiddleware]
-              end
+            def middleware(middleware, _field, _object) do
+              middleware ++ [Graphism.ErrorMiddleware]
             end
           end
         end
-      end
-    else
-      quote do
-        import unquote(__MODULE__), only: :macros
-        @before_compile unquote(__MODULE__)
       end
     end
   end
@@ -95,236 +105,214 @@ defmodule Graphism do
       caller_module
       |> Module.get_attribute(:repo)
 
+    auth_module =
+      caller_module
+      |> Module.get_attribute(:auth, caller_module)
+
     styles =
       caller_module
       |> Module.get_attribute(:styles)
 
-    unless repo do
-      []
-    else
-      schema_imports =
-        caller_module
-        |> Module.get_attribute(:schema_imports)
-        |> Enum.flat_map(fn mod ->
-          :attributes
-          |> mod.__info__()
-          |> Enum.filter(fn {name, _} -> name == :schema end)
-          |> Enum.map(fn {_, e} -> e end)
-          |> Enum.map(fn e ->
-            schema_module_alias = e[:schema_module] |> Module.split() |> List.last()
-            schema_module = Module.split(caller_module) ++ [schema_module_alias]
+    schema =
+      caller_module
+      |> Module.get_attribute(:schema)
+      |> Entity.resolve_schema()
 
-            e
-            |> Keyword.put(:schema_module, Module.concat(schema_module))
-            |> Keyword.put(:resolver_module, Module.concat(schema_module ++ [Resolver]))
-            |> Keyword.put(:api_module, Module.concat(schema_module ++ [Api]))
-          end)
-        end)
+    scopes =
+      caller_module
+      |> Module.get_attribute(:scope)
+      |> index_by(:name)
+      |> Policy.resolve_scopes()
 
-      schema =
-        caller_module
-        |> Module.get_attribute(:schema)
-        |> Kernel.++(schema_imports)
-        |> Entity.resolve_schema()
+    default_policy = Module.get_attribute(caller_module, :default_policy)
 
-      data_imports =
-        caller_module
-        |> Module.get_attribute(:schema_imports)
-        |> Enum.flat_map(fn mod ->
-          :attributes
-          |> mod.__info__()
-          |> Enum.filter(fn {name, _} -> name == :data end)
-          |> Enum.flat_map(fn {_, data} -> data end)
-        end)
+    role = Module.get_attribute(caller_module, :role)
 
-      data =
-        caller_module
-        |> Module.get_attribute(:data)
-        |> Keyword.merge(data_imports)
+    data = Module.get_attribute(caller_module, :data)
 
-      hooks_imports =
-        caller_module
-        |> Module.get_attribute(:schema_imports)
-        |> Enum.flat_map(fn mod ->
-          :attributes
-          |> mod.__info__()
-          |> Enum.filter(fn {name, _} -> name == :hooks end)
-          |> Enum.flat_map(fn {_, hooks} -> hooks end)
-        end)
+    enums =
+      data
+      |> Enum.filter(fn {_, values} -> is_list(values) end)
 
-      hooks =
-        caller_module
-        |> Module.get_attribute(:hooks)
-        |> Kernel.++(hooks_imports)
+    unless length(schema) > 0 do
+      raise """
+        Your Graphism schema is empty. Please define at least
+        one entity:
 
-      enums =
-        data
-        |> Enum.filter(fn {_, values} -> is_list(values) end)
+        entity :my_entity do
+          attribute :id, :id
+          attribute :name, :string
+        end
+      """
+    end
 
-      unless length(schema) > 0 do
-        raise """
-          Your Graphism schema is empty. Please define at least
-          one entity:
+    schema = Enum.reverse(schema)
 
-          entity :my_entity do
-            attribute :id, :id
-            attribute :name, :string
-          end
-        """
+    Enum.each(schema, fn e ->
+      Entity.ensure_not_empty!(e)
+      Entity.ensure_action_scopes!(e, scopes)
+    end)
+
+    enums_fun =
+      quote do
+        def enums() do
+          unquote(enums)
+        end
       end
 
-      schema = Enum.reverse(schema)
-
-      schema
-      |> Enum.each(fn e ->
-        if Enum.empty?(e[:attributes]) and
-             Enum.empty?(e[:relations]) do
-          raise "Entity #{e[:name]} is empty"
+    schema_fun =
+      quote do
+        def schema do
+          unquote(Macro.escape(schema))
         end
+      end
+
+    schema_empty_modules = Graphism.Schema.empty_modules(schema)
+
+    schema_modules =
+      schema
+      |> Enum.reject(&Entity.virtual?(&1))
+      |> Enum.map(fn e ->
+        Graphism.Schema.schema_module(e, schema)
       end)
 
-      enums_fun =
-        quote do
-          def enums() do
-            unquote(enums)
-          end
-        end
+    auth_funs =
+      if auth_module == caller_module do
+        Graphism.Auth.auth_funs(schema, scopes, default_policy, role)
+      else
+        nil
+      end
 
-      schema_fun =
-        quote do
-          def schema do
-            unquote(Macro.escape(schema))
-          end
-        end
+    api_modules =
+      Enum.map(schema, fn e ->
+        Graphism.Api.api_module(e, schema, repo, auth_module)
+      end)
 
-      schema_empty_modules = Graphism.Schema.empty_modules(schema)
+    dataloader_module = Graphism.Dataloader.dataloader_module(caller_module)
+    schema_filter_fun = Graphism.Querying.filter_fun()
+    schema_evaluate_fun = Graphism.Querying.evaluate_fun(repo)
+    schema_compare_fun = Graphism.Querying.compare_fun()
 
-      schema_modules =
-        schema
-        |> Enum.reject(&Entity.virtual?(&1))
-        |> Enum.map(fn e ->
-          Graphism.Schema.schema_module(e, schema, caller: __CALLER__)
-        end)
+    rest_modules =
+      if Enum.member?(styles, :rest) do
+        openapi_module = Graphism.Openapi.spec_module(schema, caller_module)
+        redocui_module = Graphism.Openapi.redocui_module(caller_module)
+        rest_router_module = Graphism.Rest.router_module(schema, caller_module)
+        rest_handler_modules = Graphism.Rest.handler_modules(schema, repo, caller_module)
+        rest_helper_modules = Graphism.Rest.helper_modules(auth_module)
+        json_encoder_modules = Graphism.Encoder.json_modules(schema)
 
-      api_modules =
-        Enum.map(schema, fn e ->
-          Graphism.Api.api_module(e, schema, hooks, repo: repo, caller: __CALLER__)
-        end)
-
-      dataloader_module = Graphism.Dataloader.dataloader_module(caller: __CALLER__)
-      schema_filter_fun = Graphism.Querying.filter_fun()
-      schema_evaluate_fun = Graphism.Querying.evaluate_fun(repo: repo)
-      schema_compare_fun = Graphism.Querying.compare_fun()
-
-      rest_modules =
-        if Enum.member?(styles, :rest) do
-          openapi_module = Graphism.Openapi.spec_module(schema, caller: __CALLER__)
-          redocui_module = Graphism.Openapi.redocui_module(schema, caller: __CALLER__)
-          rest_router_module = Graphism.Rest.router_module(schema, caller: __CALLER__)
-          rest_handler_modules = Graphism.Rest.handler_modules(schema, hooks, repo: repo, caller: __CALLER__)
-          rest_helper_modules = Graphism.Rest.helper_modules(schema, hooks, repo: repo, caller: __CALLER__)
-          json_encoder_modules = Graphism.Encoder.json_modules(schema)
-
-          [
-            openapi_module,
-            redocui_module,
-            rest_helper_modules,
-            rest_handler_modules,
-            rest_router_module,
-            json_encoder_modules
-          ]
-        else
-          []
-        end
-
-      graphql_modules =
-        if Enum.member?(styles, :graphql) do
-          graphql_resolver_modules =
-            Enum.map(schema, fn e ->
-              Graphism.Resolver.resolver_module(e, schema,
-                repo: repo,
-                hooks: hooks,
-                caller: __CALLER__
-              )
-            end)
-
-          graphql_dataloader_middleware = Graphism.Dataloader.absinthe_middleware(caller: __CALLER__)
-          graphql_enums = Graphism.Graphql.enums(enums)
-          graphql_objects = Graphism.Graphql.objects(schema, caller: __CALLER__.module)
-          graphql_self_resolver = Graphism.Graphql.self_resolver()
-          graphql_aggregate_type = Graphism.Graphql.aggregate_type()
-          graphql_entities_queries = Graphism.Graphql.entities_queries(schema)
-          graphql_entities_mutations = Graphism.Graphql.entities_mutations(schema)
-          graphql_input_types = Graphism.Graphql.input_types(schema)
-          graphql_queries = Graphism.Graphql.queries(schema)
-          graphql_mutations = Graphism.Graphql.mutations(schema)
-
-          [
-            graphql_resolver_modules,
-            graphql_dataloader_middleware,
-            graphql_enums,
-            graphql_objects,
-            graphql_self_resolver,
-            graphql_aggregate_type,
-            graphql_entities_queries,
-            graphql_entities_mutations,
-            graphql_input_types,
-            graphql_queries,
-            graphql_mutations
-          ]
-        else
-          []
-        end
-
-      List.flatten(
         [
-          enums_fun,
-          schema_fun,
-          schema_empty_modules,
-          schema_modules,
-          api_modules,
-          dataloader_module,
-          schema_filter_fun,
-          schema_evaluate_fun,
-          schema_compare_fun
-        ] ++ graphql_modules ++ rest_modules
-      )
-    end
+          openapi_module,
+          redocui_module,
+          rest_helper_modules,
+          rest_handler_modules,
+          rest_router_module,
+          json_encoder_modules
+        ]
+      else
+        []
+      end
+
+    graphql_modules =
+      if Enum.member?(styles, :graphql) do
+        graphql_resolver_modules =
+          Enum.map(schema, fn e ->
+            Graphism.Resolver.resolver_module(e, schema, auth_module, repo)
+          end)
+
+        graphql_dataloader_middleware = Graphism.Dataloader.absinthe_middleware(caller_module)
+        graphql_enums = Graphism.Graphql.enums(enums)
+        graphql_objects = Graphism.Graphql.objects(schema)
+        graphql_self_resolver = Graphism.Graphql.self_resolver()
+        graphql_aggregate_type = Graphism.Graphql.aggregate_type()
+        graphql_entities_queries = Graphism.Graphql.entities_queries(schema)
+        graphql_entities_mutations = Graphism.Graphql.entities_mutations(schema)
+        graphql_input_types = Graphism.Graphql.input_types(schema)
+        graphql_queries = Graphism.Graphql.queries(schema)
+        graphql_mutations = Graphism.Graphql.mutations(schema)
+
+        [
+          graphql_resolver_modules,
+          graphql_dataloader_middleware,
+          graphql_enums,
+          graphql_objects,
+          graphql_self_resolver,
+          graphql_aggregate_type,
+          graphql_entities_queries,
+          graphql_entities_mutations,
+          graphql_input_types,
+          graphql_queries,
+          graphql_mutations
+        ]
+      else
+        []
+      end
+
+    List.flatten(
+      [
+        enums_fun,
+        schema_fun,
+        schema_empty_modules,
+        schema_modules,
+        auth_funs,
+        api_modules,
+        dataloader_module,
+        schema_filter_fun,
+        schema_evaluate_fun,
+        schema_compare_fun
+      ] ++ graphql_modules ++ rest_modules
+    )
+  end
+
+  defp index_by(items, key) do
+    items
+    |> Enum.reduce(%{}, fn item, acc ->
+      Map.put(acc, Map.fetch!(item, key), item)
+    end)
   end
 
   defmacro import_schema({:__aliases__, _, module}) do
     Module.put_attribute(__CALLER__.module, :schema_imports, Module.concat(module))
   end
 
-  defmacro allow({:__aliases__, _, module}) do
-    hook = %{
-      kind: :allow,
-      name: :default,
-      desc: "Default hook for authorization",
-      module: Module.concat(module)
-    }
-
-    Module.put_attribute(__CALLER__.module, :hooks, hook)
+  defmacro auth({:__aliases__, _, module}) do
+    Module.put_attribute(__CALLER__.module, :auth, module)
   end
 
   defmacro entity(name, opts \\ [], do: block) do
     caller_module = __CALLER__.module
 
+    schema_module =
+      Module.concat([
+        caller_module,
+        Inflex.camelize(name)
+      ])
+
     attrs =
       Entity.attributes_from(block)
       |> Entity.maybe_add_id_attribute()
+      |> Entity.maybe_add_slug_attribute(schema_module, block)
+
+    entity_policies = Entity.entity_policies(block)
 
     rels = Entity.relations_from(block)
-    actions = Entity.actions_from(block, name)
+
+    actions =
+      block
+      |> Entity.actions_from(name)
+      |> Entity.actions_with_policies(name, entity_policies)
+
     lists = Entity.lists_from(block, name)
     keys = Entity.keys_from(block)
 
-    {actions, custom_actions} = Entity.split_actions(actions)
+    {actions, custom_actions} = Entity.split_actions(opts, actions)
     custom_actions = custom_actions ++ lists
 
     entity =
       [
         name: name,
+        schema_module: schema_module,
         attributes: attrs,
         relations: rels,
         keys: keys,
@@ -335,7 +323,6 @@ defmodule Graphism do
       ]
       |> Entity.with_plural()
       |> Entity.with_table_name()
-      |> Entity.with_schema_module(caller_module)
       |> Entity.with_api_module(caller_module)
       |> Entity.with_resolver_module(caller_module)
       |> Entity.with_handler_module(caller_module)
@@ -367,7 +354,16 @@ defmodule Graphism do
   defmacro action(_name, _opts \\ []) do
   end
 
+  defmacro custom(_name) do
+  end
+
+  defmacro action(_name, _opts, _block) do
+  end
+
   defmacro list(_name, _opts \\ []) do
+  end
+
+  defmacro list(_name, _opts, _block) do
   end
 
   defmacro data(name, value) do
@@ -429,5 +425,37 @@ defmodule Graphism do
   end
 
   defmacro json(_name, _opts \\ []) do
+  end
+
+  defmacro allow(_block) do
+  end
+
+  defmacro read(_role, _block) do
+  end
+
+  defmacro write(_role, _block \\ nil) do
+  end
+
+  defmacro scope(name, block) do
+    scope = Policy.scope_from(name, block)
+    Module.put_attribute(__CALLER__.module, :scope, scope)
+  end
+
+  defmacro scope(_name) do
+  end
+
+  defmacro deny do
+    Module.put_attribute(__CALLER__.module, :default_policy, :deny)
+  end
+
+  defmacro allow do
+    Module.put_attribute(__CALLER__.module, :default_policy, :allow)
+  end
+
+  defmacro role(expr) do
+    Module.put_attribute(__CALLER__.module, :role, expr)
+  end
+
+  defmacro slug(_field) do
   end
 end

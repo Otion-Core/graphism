@@ -1,26 +1,30 @@
 defmodule Graphism.Resolver do
   @moduledoc "Produces Graphql resolver code"
 
-  alias Graphism.{Ast, Hooks, Entity}
+  alias Graphism.{Ast, Entity}
 
-  def resolver_module(e, schema, opts) do
-    api_module = e[:api_module]
-    hooks = Keyword.fetch!(opts, :hooks)
+  def resolver_module(e, schema, auth_module, repo_module) do
+    api_module = Keyword.fetch!(e, :api_module)
 
     resolver_funs =
-      []
-      |> with_resolver_pagination_fun()
-      |> with_resolver_scope_results_fun(e, hooks)
-      |> with_resolver_auth_funs(e, schema, hooks)
-      |> with_resolver_inlined_relations_funs(e, schema, api_module)
-      |> with_resolver_list_funs(e, schema, api_module, hooks)
-      |> with_resolver_aggregate_funs(e, schema, api_module)
-      |> with_resolver_read_funs(e, schema, api_module)
-      |> with_resolver_create_fun(e, schema, api_module, opts)
-      |> with_resolver_update_fun(e, schema, api_module, opts)
-      |> with_resolver_delete_fun(e, schema, api_module)
-      |> with_resolver_custom_funs(e, schema, api_module, hooks)
-      |> List.flatten()
+      if Entity.virtual?(e) do
+        []
+        |> with_resolver_auth_funs(e, schema, auth_module)
+        |> with_virtual_resolver_custom_funs(e, schema, api_module)
+      else
+        []
+        |> with_resolver_pagination_fun()
+        |> with_resolver_auth_funs(e, schema, auth_module)
+        |> with_resolver_inlined_relations_funs(e, schema, api_module)
+        |> with_resolver_list_funs(e, schema, api_module)
+        |> with_resolver_aggregate_funs(e, schema, api_module)
+        |> with_resolver_read_funs(e, schema, api_module)
+        |> with_resolver_create_fun(e, schema, api_module, repo_module)
+        |> with_resolver_update_fun(e, schema, api_module, repo_module)
+        |> with_resolver_delete_fun(e, schema, api_module)
+        |> with_resolver_custom_funs(e, schema, api_module)
+        |> List.flatten()
+      end
 
     quote do
       defmodule unquote(e[:resolver_module]) do
@@ -44,124 +48,65 @@ defmodule Graphism.Resolver do
     ]
   end
 
-  defp with_resolver_scope_results_fun(funs, e, hooks) do
-    mod = Hooks.auth_module(hooks)
-
-    fun =
-      if mod != nil && Entity.scope_results?(e) do
-        quote do
-          defp scope_results(items, context) do
-            entity = context.graphism.entity
-            context = put_in(context, [:graphism, :action], :read)
-            meta = %{entity: entity, kind: :scope, value: :undefined}
-
-            {:ok,
-             Enum.filter(items, fn item ->
-               context = Map.put(context, entity, item)
-
-               :telemetry.span([:graphism, :allow], meta, fn ->
-                 {unquote(mod).allow?(%{}, context), meta}
-               end)
-             end)}
-          end
-        end
-      else
-        quote do
-          defp scope_results(items, _context), do: {:ok, items}
-        end
-      end
-
-    [
-      fun | funs
-    ]
-  end
-
-  defp with_resolver_auth_funs(funs, e, schema, hooks) do
+  defp with_resolver_auth_funs(funs, e, schema, auth_module) do
     action_resolver_auth_funs =
       (e[:actions] ++ e[:custom_actions])
       |> Enum.reject(fn {name, _} -> name == :list end)
       |> Enum.map(fn {name, opts} ->
-        resolver_auth_fun(name, opts, e, schema, hooks)
+        resolver_auth_fun(name, opts, e, schema, auth_module)
       end)
 
     funs ++
       ([
          action_resolver_auth_funs,
-         resolver_list_auth_funs(e, schema, hooks)
+         resolver_list_auth_funs(e, schema, auth_module)
        ]
        |> List.flatten()
        |> Enum.reject(&is_nil/1))
   end
 
-  defp resolver_list_auth_funs(e, schema, hooks) do
-    e[:actions]
+  defp resolver_list_auth_funs(e, schema, auth_module) do
+    (e[:actions] ++ e[:custom_actions])
     |> Enum.filter(fn {action, _opts} -> action == :list end)
     |> Enum.flat_map(fn {_, opts} ->
       [
-        resolver_list_all_auth_fun(e, opts, schema, hooks),
-        resolver_list_by_parent_auth_funs(e, opts, schema, hooks)
+        resolver_list_all_auth_fun(e, opts, schema, auth_module),
+        resolver_list_by_parent_auth_funs(e, opts, schema, auth_module)
       ]
     end)
   end
 
-  defp simple_auth_context(e, action) do
+  defp simple_auth_context do
     quote do
-      context =
-        context
-        |> Map.drop([:__absinthe_plug__, :loader, :pubsub])
-        |> Map.put(:graphism, %{
-          entity: unquote(e[:name]),
-          action: unquote(action),
-          schema: unquote(e[:schema_module])
-        })
+      context = Map.drop(context, [:__absinthe_plug__, :loader, :pubsub])
     end
   end
 
-  defp auth_mod_invocation(mod, e, fun_name) do
+  defp allow_invocation(mod, e, action) do
     quote do
-      meta = %{entity: unquote(e[:name]), kind: :action, value: unquote(fun_name)}
-
-      :telemetry.span([:graphism, :allow], meta, fn ->
-        {with false <- unquote(mod).allow?(unquote(Ast.var(:args)), context) do
-           {:error, :unauthorized}
-         end, meta}
-      end)
-    end
-  end
-
-  defp resolver_list_all_auth_fun(e, _opts, _schema, hooks) do
-    mod = Hooks.auth_module(hooks)
-
-    if mod != nil do
-      quote do
-        defp should_list?(unquote(Ast.var(:args)), context) do
-          unquote(auth_mod_invocation(mod, e, :should_list))
-        end
-      end
-    else
-      quote do
-        defp should_list?(_args, _context), do: true
+      with false <- unquote(mod).allow?(unquote(e[:name]), unquote(action), unquote(Ast.var(:args)), context) do
+        {:error, :unauthorized}
       end
     end
   end
 
-  defp resolver_list_by_parent_auth_funs(e, _opts, _schema, hooks) do
-    mod = Hooks.auth_module(hooks)
+  defp resolver_list_all_auth_fun(e, _opts, _schema, auth_module) do
+    quote do
+      defp should_list?(unquote(Ast.var(:args)), context) do
+        unquote(allow_invocation(auth_module, e, :list))
+      end
+    end
+  end
 
+  defp resolver_list_by_parent_auth_funs(e, _opts, _schema, auth_module) do
     e
     |> Entity.parent_relations()
     |> Enum.map(fn rel ->
       fun_name = String.to_atom("should_list_by_#{rel[:name]}?")
 
-      if mod != nil do
-        quote do
-          defp unquote(fun_name)(unquote(Ast.var(:args)), context) do
-            unquote(auth_mod_invocation(mod, e, fun_name))
-          end
-        end
-      else
-        quote do
-          defp unquote(fun_name)(_args, _context), do: true
+      quote do
+        defp unquote(fun_name)(unquote(Ast.var(:args)), context) do
+          unquote(allow_invocation(auth_module, e, :list))
         end
       end
     end)
@@ -183,66 +128,48 @@ defmodule Graphism.Resolver do
     end
   end
 
-  defp resolver_auth_fun(action, opts, e, _schema, hooks) do
-    mod = Hooks.auth_module(hooks)
-
+  defp resolver_auth_fun(action, opts, e, _schema, auth_module) do
     fun_name = String.to_atom("should_#{action}?")
 
     entities_var_names = auth_fun_entities_arg_names(e, action, opts)
 
-    if mod != nil do
-      {empty_data, data_with_args, context_with_data} =
-        case entities_var_names do
-          [] ->
-            {nil, nil, nil}
+    {empty_data, data_with_args, context_with_data} =
+      case entities_var_names do
+        [] ->
+          {nil, nil, nil}
 
-          _ ->
-            {
+        _ ->
+          {
+            quote do
+              data = %{}
+            end,
+            Enum.map(entities_var_names, fn e ->
               quote do
-                data = %{}
-              end,
-              Enum.map(entities_var_names, fn e ->
-                quote do
-                  data = Map.put(data, unquote(e), unquote(Ast.var(e)))
-                end
-              end),
-              quote do
-                context = Map.merge(context, data)
+                data = Map.put(data, unquote(e), unquote(Ast.var(e)))
               end
-            }
-        end
-
-      quote do
-        def unquote(fun_name)(
-              unquote_splicing(Ast.vars(entities_var_names)),
-              unquote(Ast.var(:args)),
-              context
-            ) do
-          (unquote_splicing(
-             [
-               empty_data,
-               data_with_args,
-               context_with_data,
-               auth_mod_invocation(mod, e, fun_name)
-             ]
-             |> List.flatten()
-             |> Enum.reject(&is_nil/1)
-           ))
-        end
+            end),
+            quote do
+              context = Map.merge(context, data)
+            end
+          }
       end
-    else
-      entities_var_names =
-        Enum.map(entities_var_names, fn name ->
-          String.to_atom("_#{name}")
-        end)
 
-      quote do
-        def unquote(fun_name)(
-              unquote_splicing(Ast.vars(entities_var_names)),
-              unquote(Ast.var(:_args)),
-              _context
-            ),
-            do: true
+    quote do
+      def unquote(fun_name)(
+            unquote_splicing(Ast.vars(entities_var_names)),
+            unquote(Ast.var(:args)),
+            context
+          ) do
+        (unquote_splicing(
+           [
+             empty_data,
+             data_with_args,
+             context_with_data,
+             allow_invocation(auth_module, e, action)
+           ]
+           |> List.flatten()
+           |> Enum.reject(&is_nil/1)
+         ))
       end
     end
   end
@@ -364,21 +291,20 @@ defmodule Graphism.Resolver do
      |> Enum.reject(&is_nil/1)) ++ funs
   end
 
-  defp resolver_list_fun(e, _schema, api_module, _hooks) do
+  defp resolver_list_fun(api_module) do
     quote do
       def list(_, unquote(Ast.var(:args)), %{context: context}) do
-        unquote(simple_auth_context(e, :list))
+        unquote(simple_auth_context())
 
         with true <- should_list?(unquote(Ast.var(:args)), context),
-             context <- context_with_pagination(unquote(Ast.var(:args)), context),
-             {:ok, items} <- unquote(api_module).list(context) do
-          scope_results(items, context)
+             context <- context_with_pagination(unquote(Ast.var(:args)), context) do
+          unquote(api_module).list(context)
         end
       end
     end
   end
 
-  defp resolver_list_by_relation_funs(e, schema, api_module, _hooks) do
+  defp resolver_list_by_relation_funs(e, schema, api_module) do
     e
     |> Entity.parent_relations()
     |> Enum.map(fn rel ->
@@ -388,21 +314,20 @@ defmodule Graphism.Resolver do
 
       quote do
         def unquote(fun_name)(_, unquote(Ast.var(:args)), %{context: context}) do
-          unquote(simple_auth_context(e, :list))
+          unquote(simple_auth_context())
 
           with {:ok, unquote(Ast.var(rel))} <-
                  unquote(target[:api_module]).get_by_id(unquote(Ast.var(:args)).unquote(rel[:name])),
                true <- unquote(auth_fun_name)(unquote(Ast.var(rel)), context),
-               context <- context_with_pagination(unquote(Ast.var(:args)), context),
-               {:ok, items} <- unquote(api_module).unquote(fun_name)(unquote(Ast.var(rel)).id, context) do
-            scope_results(items, context)
+               context <- context_with_pagination(unquote(Ast.var(:args)), context) do
+            unquote(api_module).unquote(fun_name)(unquote(Ast.var(rel)).id, context)
           end
         end
       end
     end)
   end
 
-  defp resolver_list_by_non_unique_keys_funs(e, _schema, api_module, _hooks) do
+  defp resolver_list_by_non_unique_keys_funs(e, _schema, api_module) do
     e
     |> Entity.non_unique_keys()
     |> Enum.map(fn key ->
@@ -410,36 +335,35 @@ defmodule Graphism.Resolver do
 
       quote do
         def unquote(fun_name)(_, unquote(Ast.var(:args)), %{context: context}) do
-          unquote(simple_auth_context(e, :list))
+          unquote(simple_auth_context())
 
           with unquote_splicing(
                  [
                    should_invocation(e, :list),
                    extract_args_for_entity_key(key),
-                   context_with_pagination_invocation(),
-                   api_call_invocation(fun_name, api_module, args: key[:fields])
+                   context_with_pagination_invocation()
                  ]
                  |> List.flatten()
                ) do
-            scope_results(items, context)
+            unquote(api_call_invocation(fun_name, api_module, args: key[:fields]))
           end
         end
       end
     end)
   end
 
-  defp with_resolver_list_funs(funs, e, schema, api_module, hooks) do
+  defp with_resolver_list_funs(funs, e, schema, api_module) do
     with_entity_funs(funs, e, :list, fn ->
-      [resolver_list_fun(e, schema, api_module, hooks)] ++
-        resolver_list_by_relation_funs(e, schema, api_module, hooks) ++
-        resolver_list_by_non_unique_keys_funs(e, schema, api_module, hooks)
+      [resolver_list_fun(api_module)] ++
+        resolver_list_by_relation_funs(e, schema, api_module) ++
+        resolver_list_by_non_unique_keys_funs(e, schema, api_module)
     end)
   end
 
-  defp resolver_aggregate_all_fun(e, _schema, api_module) do
+  defp resolver_aggregate_all_fun(api_module) do
     quote do
       def aggregate_all(_, unquote(Ast.var(:args)), %{context: context}) do
-        unquote(simple_auth_context(e, :list))
+        unquote(simple_auth_context())
 
         with true <- should_list?(unquote(Ast.var(:args)), context) do
           unquote(api_module).aggregate(context)
@@ -458,7 +382,7 @@ defmodule Graphism.Resolver do
 
       quote do
         def unquote(fun_name)(_, unquote(Ast.var(:args)), %{context: context}) do
-          unquote(simple_auth_context(e, :list))
+          unquote(simple_auth_context())
 
           with {:ok, unquote(Ast.var(rel))} <-
                  unquote(target[:api_module]).get_by_id(unquote(Ast.var(:args)).unquote(rel[:name])),
@@ -481,7 +405,7 @@ defmodule Graphism.Resolver do
 
       quote do
         def unquote(fun_name)(_, unquote(Ast.var(:args)), %{context: context}) do
-          unquote(simple_auth_context(e, :list))
+          unquote(simple_auth_context())
 
           with unquote_splicing(
                  [
@@ -490,7 +414,7 @@ defmodule Graphism.Resolver do
                  ]
                  |> List.flatten()
                ) do
-            unquote(api_call_invocation(fun_name, api_module, args: key[:fields], with: false))
+            unquote(api_call_invocation(fun_name, api_module, args: key[:fields]))
           end
         end
       end
@@ -499,7 +423,7 @@ defmodule Graphism.Resolver do
 
   defp with_resolver_aggregate_funs(funs, e, schema, api_module) do
     with_entity_funs(funs, e, :list, fn ->
-      [resolver_aggregate_all_fun(e, schema, api_module)] ++
+      [resolver_aggregate_all_fun(api_module)] ++
         resolver_aggregate_by_relation_funs(e, schema, api_module) ++
         resolver_aggregate_by_non_unique_key_funs(e, schema, api_module)
     end)
@@ -571,7 +495,7 @@ defmodule Graphism.Resolver do
     |> with_parent_entities_fetch_from_rels(e, schema, opts)
   end
 
-  defp with_computed_attributes(e, _schema, _opts) do
+  defp with_computed_attributes(e) do
     e[:attributes]
     |> Enum.filter(&Entity.computed?/1)
     |> Enum.flat_map(fn attr ->
@@ -581,7 +505,7 @@ defmodule Graphism.Resolver do
 
           [
             quote do
-              {:ok, unquote(Ast.var(attr))} <- unquote(mod).execute(context)
+              {:ok, unquote(Ast.var(attr))} <- unquote(mod).execute(unquote(Ast.var(:args)), context)
             end,
             quote do
               unquote(Ast.var(:args)) <-
@@ -629,7 +553,7 @@ defmodule Graphism.Resolver do
               mod = rel[:opts][:using]
 
               quote do
-                {:ok, unquote(Ast.var(rel))} <- unquote(mod).execute(context)
+                {:ok, unquote(Ast.var(rel))} <- unquote(mod).execute(args, context)
               end
 
             rel[:opts][:from] != nil ->
@@ -798,7 +722,7 @@ defmodule Graphism.Resolver do
     end
   end
 
-  defp with_resolver_create_fun(funs, e, schema, api_module, opts) do
+  defp with_resolver_create_fun(funs, e, schema, api_module, repo_module) do
     with_entity_funs(funs, e, :create, fn ->
       inlined_children = inlined_children_for_action(e, :create)
 
@@ -806,14 +730,14 @@ defmodule Graphism.Resolver do
 
       quote do
         def create(unquote(parent_var), unquote(Ast.var(:args)), unquote(resolution_var)) do
-          unquote(simple_auth_context(e, :create))
+          unquote(simple_auth_context())
 
           with unquote_splicing(
                  [
                    with_parent_entities_fetch(e, schema, action: :create),
                    with_args_without_parents(e),
                    maybe_with_args_with_autogenerated_id!(e),
-                   with_computed_attributes(e, schema, opts),
+                   with_computed_attributes(e),
                    should_invocation(e, :create)
                  ]
                  |> List.flatten()
@@ -838,7 +762,7 @@ defmodule Graphism.Resolver do
                         unquote(Entity.names(children))
                       )
 
-                    unquote(opts[:repo]).transaction(fn ->
+                    unquote(repo_module).transaction(fn ->
                       with {:ok, unquote(Ast.var(e))} <-
                              unquote(api_module).create(
                                unquote_splicing(
@@ -855,7 +779,7 @@ defmodule Graphism.Resolver do
                         unquote(Ast.var(e))
                       else
                         {:error, changeset} ->
-                          unquote(opts[:repo]).rollback(changeset)
+                          unquote(repo_module).rollback(changeset)
                       end
                     end)
                   end
@@ -867,7 +791,7 @@ defmodule Graphism.Resolver do
     end)
   end
 
-  defp with_resolver_update_fun(funs, e, schema, api_module, opts) do
+  defp with_resolver_update_fun(funs, e, schema, api_module, repo_module) do
     with_entity_funs(funs, e, :update, fn ->
       inlined_children = inlined_children_for_action(e, :update)
 
@@ -876,7 +800,7 @@ defmodule Graphism.Resolver do
       ast =
         quote do
           def update(unquote(parent_var), unquote(Ast.var(:args)), unquote(resolution_var)) do
-            unquote(simple_auth_context(e, :update))
+            unquote(simple_auth_context())
 
             with unquote_splicing(
                    [
@@ -909,7 +833,7 @@ defmodule Graphism.Resolver do
                           unquote(Entity.names(children))
                         )
 
-                      unquote(opts[:repo]).transaction(fn ->
+                      unquote(repo_module).transaction(fn ->
                         with {:ok, unquote(Ast.var(e))} <-
                                unquote(api_module).update(
                                  unquote_splicing(
@@ -926,7 +850,7 @@ defmodule Graphism.Resolver do
                           unquote(Ast.var(e))
                         else
                           {:error, changeset} ->
-                            unquote(opts[:repo]).rollback(changeset)
+                            unquote(repo_module).rollback(changeset)
                         end
                       end)
                     end
@@ -944,7 +868,7 @@ defmodule Graphism.Resolver do
     with_entity_funs(funs, e, :delete, fn ->
       quote do
         def delete(_parent, unquote(Ast.var(:args)), %{context: context}) do
-          unquote(simple_auth_context(e, :delete))
+          unquote(simple_auth_context())
 
           with unquote_splicing(
                  [
@@ -961,25 +885,33 @@ defmodule Graphism.Resolver do
     end)
   end
 
-  defp with_resolver_custom_funs(funs, e, schema, api_module, hooks) do
+  defp with_resolver_custom_funs(funs, e, schema, api_module) do
     custom_queries_funs =
       e
       |> Entity.custom_queries()
-      |> Enum.flat_map(fn {name, opts} ->
+      |> Enum.flat_map(fn {name, _opts} ->
         [
-          resolver_custom_query_fun(e, name, opts, api_module, hooks, schema),
-          resolver_custom_query_aggregate_fun(e, name, opts, api_module, hooks, schema)
+          resolver_custom_query_fun(e, name, api_module),
+          resolver_custom_query_aggregate_fun(e, name, api_module)
         ]
       end)
 
     custom_mutations_funs =
       e
       |> Entity.custom_mutations()
-      |> Enum.map(fn {name, opts} ->
-        resolver_custom_mutation_fun(e, name, opts, api_module, hooks, schema)
+      |> Enum.map(fn {name, action_opts} ->
+        resolver_custom_mutation_fun(e, name, action_opts, api_module, schema)
       end)
 
     custom_queries_funs ++ custom_mutations_funs ++ funs
+  end
+
+  defp with_virtual_resolver_custom_funs(funs, e, schema, api_module) do
+    actions = e[:actions] ++ e[:custom_actions]
+
+    Enum.map(actions, fn {name, action_opts} ->
+      resolver_custom_mutation_fun(e, name, action_opts, api_module, schema)
+    end) ++ funs
   end
 
   defp context_with_pagination_invocation do
@@ -991,16 +923,8 @@ defmodule Graphism.Resolver do
   defp api_call_invocation(action, api_module, opts \\ []) do
     args = Keyword.get(opts, :args, [:args])
 
-    case Keyword.get(opts, :with, true) do
-      true ->
-        quote do
-          {:ok, items} <- unquote(api_module).unquote(action)(unquote_splicing(Ast.vars(args)), context)
-        end
-
-      false ->
-        quote do
-          unquote(api_module).unquote(action)(unquote_splicing(Ast.vars(args)), context)
-        end
+    quote do
+      unquote(api_module).unquote(action)(unquote_splicing(Ast.vars(args)), context)
     end
   end
 
@@ -1012,28 +936,27 @@ defmodule Graphism.Resolver do
     end)
   end
 
-  defp resolver_custom_query_fun(e, action, _opts, api_module, _hooks, _schema) do
+  defp resolver_custom_query_fun(e, action, api_module) do
     quote do
       def unquote(action)(_, unquote(Ast.var(:args)), %{context: context}) do
-        unquote(simple_auth_context(e, action))
+        unquote(simple_auth_context())
 
         with unquote_splicing([
                should_invocation(e, action),
-               context_with_pagination_invocation(),
-               api_call_invocation(action, api_module)
+               context_with_pagination_invocation()
              ]) do
-          scope_results(items, context)
+          unquote(api_call_invocation(action, api_module))
         end
       end
     end
   end
 
-  defp resolver_custom_query_aggregate_fun(e, action, _opts, api_module, _hooks, _schema) do
+  defp resolver_custom_query_aggregate_fun(e, action, api_module) do
     fun_name = String.to_atom("aggregate_#{action}")
 
     quote do
       def unquote(fun_name)(_, unquote(Ast.var(:args)), %{context: context}) do
-        unquote(simple_auth_context(e, action))
+        unquote(simple_auth_context())
 
         with unquote_splicing([
                should_invocation(e, action)
@@ -1044,20 +967,20 @@ defmodule Graphism.Resolver do
     end
   end
 
-  defp resolver_custom_mutation_fun(e, action, opts, api_module, _hooks, schema) do
-    opts = Keyword.put(opts, :action, action)
+  defp resolver_custom_mutation_fun(e, action, action_opts, api_module, schema) do
+    action_opts = Keyword.put(action_opts, :action, action)
 
     quote do
       def unquote(action)(_, unquote(Ast.var(:args)), %{context: context}) do
-        unquote(simple_auth_context(e, action))
+        unquote(simple_auth_context())
 
         with unquote_splicing(
                [
-                 with_custom_action_entity_fetch(e, opts, schema),
-                 with_custom_parent_entities_fetch(e, schema, opts),
-                 with_custom_args_with_parents(e, opts, schema),
-                 maybe_with_with_autogenerated_id(e, opts, schema),
-                 should_invocation(e, action, opts)
+                 with_custom_action_entity_fetch(e, action_opts, schema),
+                 with_custom_parent_entities_fetch(e, schema, action_opts),
+                 with_custom_args_with_parents(e, action_opts, schema),
+                 maybe_with_with_autogenerated_id(e, action_opts, schema),
+                 should_invocation(e, action, action_opts)
                ]
                |> List.flatten()
                |> Enum.reject(&is_nil/1)
@@ -1077,7 +1000,7 @@ defmodule Graphism.Resolver do
   end
 
   defp with_entity_funs(funs, e, action, fun) do
-    case Entity.action?(e, action) do
+    case Entity.action?(e, action) && !Entity.custom_action?(e, action) do
       true ->
         case fun.() do
           [_ | _] = more_funs ->
@@ -1095,7 +1018,7 @@ defmodule Graphism.Resolver do
   defp get_by_id_resolver_fun(e) do
     quote do
       def get_by_id(_, unquote(Ast.var(:args)), %{context: context}) do
-        unquote(simple_auth_context(e, :read))
+        unquote(simple_auth_context())
 
         with unquote_splicing([
                with_entity_fetch(e),
@@ -1128,7 +1051,7 @@ defmodule Graphism.Resolver do
 
       quote do
         def unquote(fun_name)(_, unquote(Ast.var(:args)), %{context: context}) do
-          unquote(simple_auth_context(e, :list))
+          unquote(simple_auth_context())
 
           with unquote_splicing([
                  api_call,
@@ -1154,7 +1077,7 @@ defmodule Graphism.Resolver do
               unquote(Ast.var(:args)),
               %{context: context}
             ) do
-          unquote(simple_auth_context(e, :read))
+          unquote(simple_auth_context())
 
           with unquote_splicing([
                  with_entity_fetch(e, attr_name),

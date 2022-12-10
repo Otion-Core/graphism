@@ -1221,7 +1221,7 @@ defmodule Graphism.Migrations do
           {m, -2000 - table_index(tables, m[:table])}
 
         {:alter, :table} ->
-          {m, 0}
+          {m, 500}
 
         {:create, :enum} ->
           {m, 3000}
@@ -1233,7 +1233,7 @@ defmodule Graphism.Migrations do
           {m, 1000}
 
         {:create, :index} ->
-          {m, 500}
+          {m, 0}
 
         {:drop, :index} ->
           {m, -500}

@@ -21,11 +21,11 @@ defmodule Graphism.Graphql do
     end)
   end
 
-  def objects(schema, opts) do
+  def objects(schema) do
     [
       unit_graphql_object()
       | Enum.map(schema, fn e ->
-          graphql_object(e, schema, opts)
+          graphql_object(e, schema)
         end)
     ]
   end
@@ -38,13 +38,13 @@ defmodule Graphism.Graphql do
     end
   end
 
-  defp graphql_object(e, schema, opts) do
+  defp graphql_object(e, schema) do
     quote do
       object unquote(e[:name]) do
         (unquote_splicing(
-           graphql_attribute_fields(e, schema, opts) ++
+           graphql_attribute_fields(e) ++
              graphql_timestamp_fields() ++
-             graphql_relation_fields(e, schema, opts)
+             graphql_relation_fields(e, schema)
          ))
       end
     end
@@ -84,7 +84,7 @@ defmodule Graphism.Graphql do
          !Entity.boolean?(attr))
   end
 
-  defp graphql_attribute_fields(e, _schema, opts \\ []) do
+  defp graphql_attribute_fields(e, opts \\ []) do
     e[:attributes]
     |> Enum.reject(fn attr ->
       Enum.member?(opts[:skip] || [], attr[:name])
@@ -118,7 +118,7 @@ defmodule Graphism.Graphql do
     end)
   end
 
-  defp graphql_relation_fields(e, schema, opts) do
+  defp graphql_relation_fields(e, schema, opts \\ []) do
     e[:relations]
     |> Enum.reject(fn rel ->
       # inside input types, we don't want to include children
@@ -282,18 +282,22 @@ defmodule Graphism.Graphql do
 
   defp multiple_graphql_queries(e, schema) do
     queries =
-      if Entity.action?(e, :list) do
-        [
-          graphql_query_list_all(e, schema),
-          graphql_query_aggregate_all(e, schema),
-          graphql_query_find_by_parent_queries(e, schema),
-          graphql_query_aggregate_by_parent_queries(e, schema),
-          graphql_list_by_non_unique_key_queries(e, schema),
-          graphql_aggregate_by_non_unique_key_queries(e, schema)
-        ]
-      else
-        []
-      end
+      Entity.with_action(e, :list, fn _ ->
+        if Entity.virtual?(e) do
+          [
+            graphql_query_list_all(e, schema)
+          ]
+        else
+          [
+            graphql_query_list_all(e, schema),
+            graphql_query_aggregate_all(e, schema),
+            graphql_query_find_by_parent_queries(e, schema),
+            graphql_query_aggregate_by_parent_queries(e, schema),
+            graphql_list_by_non_unique_key_queries(e, schema),
+            graphql_aggregate_by_non_unique_key_queries(e, schema)
+          ]
+        end
+      end) || []
 
     case queries ++ graphql_multiple_results_custom_queries(e) do
       [] ->
@@ -559,7 +563,7 @@ defmodule Graphism.Graphql do
       quote do
         input_object unquote(input_type) do
           (unquote_splicing(
-             graphql_attribute_fields(target, schema, mode: :input, skip: [:id]) ++
+             graphql_attribute_fields(target, mode: :input, skip: [:id]) ++
                graphql_relation_fields(target, schema,
                  mode: :input,
                  skip: [
@@ -582,7 +586,7 @@ defmodule Graphism.Graphql do
       quote do
         input_object unquote(input_type) do
           (unquote_splicing(
-             graphql_attribute_fields(target, schema, mode: :update) ++
+             graphql_attribute_fields(target, mode: :update) ++
                graphql_relation_fields(target, schema,
                  mode: :update_input,
                  skip: [

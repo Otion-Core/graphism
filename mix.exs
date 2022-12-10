@@ -34,6 +34,7 @@ defmodule Graphism.MixProject do
       {:plug_cowboy, "~> 2.0"},
       {:postgrex, ">= 0.0.0"},
       {:recase, "~> 0.5"},
+      {:slugify, "~> 1.3"},
       {:telemetry, "~> 1.0", override: true}
     ]
   end
