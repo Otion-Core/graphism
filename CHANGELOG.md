@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+# 0.10.0 (December 10th, 2022)
+
 * Policies - [#131](https://github.com/Gravity-Core/graphism/pull/131)
 
 # 0.9.0 (October 30th, 2022)
