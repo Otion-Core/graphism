@@ -63,6 +63,7 @@ defmodule Graphism.Policy do
     %{app: app, env: Module.concat(env), key: key}
   end
 
+  defp value(nil), do: {:literal, nil}
   defp value(v) when is_boolean(v), do: {:literal, v}
   defp value({:literal, _, [v]}), do: {:literal, v}
 

@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+# 0.10.1 (June 19th, 2023)
+
+* Allow nil comparison in scopes - [#132](https://github.com/Gravity-Core/graphism/pull/132)
+
 # 0.10.0 (December 10th, 2022)
 
 * Policies - [#131](https://github.com/Gravity-Core/graphism/pull/131)
