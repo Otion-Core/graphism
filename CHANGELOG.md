@@ -4,11 +4,11 @@
 
 # 0.10.2 (June 22th, 2023)
 
-* Not-equal comparison syntax sugar - [#133](https://github.com/Gravity-Core/graphism/pull/133)
+* Not-equal comparison syntax sugar - [#138](https://github.com/Gravity-Core/graphism/pull/138)
 
 # 0.10.1 (June 19th, 2023)
 
-* Allow nil comparison in scopes - [#132](https://github.com/Gravity-Core/graphism/pull/132)
+* Allow nil comparison in scopes - [#137](https://github.com/Gravity-Core/graphism/pull/137)
 
 # 0.10.0 (December 10th, 2022)
 
