@@ -35,6 +35,7 @@ defmodule Graphism.Policy do
   end
 
   defp op(:==), do: :eq
+  defp op(:!=), do: :neq
   defp op(op) when is_atom(op), do: op
   defp op(other), do: raise("scope operator #{inspect(other)} is not supported")
 
