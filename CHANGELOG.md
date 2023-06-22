@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+# 0.10.3 (June 22th, 2023)
+
+* Better support for :neq in comparisons - [#139](https://github.com/Gravity-Core/graphism/pull/139)
+
 # 0.10.2 (June 22th, 2023)
 
 * Not-equal comparison syntax sugar - [#138](https://github.com/Gravity-Core/graphism/pull/138)
