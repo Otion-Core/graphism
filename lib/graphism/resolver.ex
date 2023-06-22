@@ -30,7 +30,7 @@ defmodule Graphism.Resolver do
       defmodule unquote(e[:resolver_module]) do
         (unquote_splicing(resolver_funs))
       end
-    end
+    end  |> Ast.print(e[:name] == :folder)
   end
 
   defp with_resolver_pagination_fun(funs) do
@@ -609,17 +609,37 @@ defmodule Graphism.Resolver do
                     end
 
                   true ->
-                    quote do
-                      case Map.get(unquote(Ast.var(:args)), unquote(arg_name), nil) do
-                        nil ->
-                          {:ok, nil}
+                    case opts[:action] do
+                      :update ->
+                        quote do
+                          if Map.has_key?(unquote(Ast.var(:args)), unquote(arg_name)) do
+                            case Map.get(unquote(Ast.var(:args)), unquote(arg_name), nil) do
+                              nil ->
+                                {:ok, nil}
 
-                        "" ->
-                          {:ok, nil}
+                              "" ->
+                                {:ok, nil}
 
-                        key ->
-                          unquote(target[:api_module]).unquote(lookup_fun)(key)
-                      end
+                              key ->
+                                unquote(target[:api_module]).unquote(lookup_fun)(key)
+                            end
+                          else
+                            {:ok, unquote(api_module).relation(unquote(Ast.var(e)), unquote(rel[:name]))}
+                          end
+                        end
+                      _ ->
+                        quote do
+                          case Map.get(unquote(Ast.var(:args)), unquote(arg_name), nil) do
+                            nil ->
+                              {:ok, nil}
+
+                            "" ->
+                              {:ok, nil}
+
+                            key ->
+                              unquote(target[:api_module]).unquote(lookup_fun)(key)
+                          end
+                        end
                     end
                 end
               )
