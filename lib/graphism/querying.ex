@@ -225,6 +225,8 @@ defmodule Graphism.Querying do
 
   def compare_fun do
     quote do
+      def compare(v, v, :neq), do: false
+      def compare(_, _, :neq), do: true
       def compare(nil, nil, _), do: true
       def compare(nil, _, _), do: false
       def compare(v, v, :eq), do: true
