@@ -207,6 +207,7 @@ defmodule Graphism.Migrations do
   defp on_delete_column_opt(rel) do
     case get_in(rel, [:opts, :delete]) do
       :cascade -> :delete_all
+      :set_nil -> :nilify_all
       nil -> :nothing
     end
   end
