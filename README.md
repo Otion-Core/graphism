@@ -558,6 +558,16 @@ end
 Graphism will take of writing the correct migrations, including dropping existing constraints, in order to fully support
 changes in this policy.
 
+For optional parent relations, it is possible to nullify the value pointed at with:
+
+```elixir
+entity :node do
+  ...
+  maybe_belongs_to(:node, as: parent, delete: :set_nil)
+  ...
+end
+```
+
 ### Schema introspection
 
 Sometimes you might need to be able to instrospect your schema in a programmatic way. Graphism generates
