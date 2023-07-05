@@ -3,6 +3,7 @@
 ## Unreleased
 
 * Set nil on parent deletes - [#141](https://github.com/Gravity-Core/graphism/pull/141)
+* Policy evaluation debug logs - [#142](https://github.com/Gravity-Core/graphism/pull/142)
 
 # 0.11.0 (June 22th, 2023)
 

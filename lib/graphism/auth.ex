@@ -121,6 +121,10 @@ defmodule Graphism.Auth do
         end)
       end
 
+      @debug Application.compile_env(:graphism, :debug)
+
+      require Logger
+
       defp do_policy_allow?(%{prop: prop_spec, value: value_spec, op: op}, args, context, paths) do
         context = Map.put(context, :args, args)
 
@@ -140,15 +144,20 @@ defmodule Graphism.Auth do
         value = evaluate(context, value_spec)
         result = compare(prop, value, op)
 
-        #IO.inspect(
-        #  paths: paths,
-        #  context: context,
-        #  prop_spec: prop_spec,
-        #  prop: prop,
-        #  value_spec: value_spec,
-        #  value: value,
-        #  result: result
-        #)
+        if @debug do
+          info = [
+            paths: paths,
+            context: context,
+            prop_spec: prop_spec,
+            prop: prop,
+            value_spec: value_spec,
+            value: value,
+            result: result,
+            op: op
+          ]
+
+          Logger.debug("graphism do_policy_allow?/4: #{inspect(info, pretty: true)}")
+        end
 
         result
       end
