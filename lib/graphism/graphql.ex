@@ -119,15 +119,15 @@ defmodule Graphism.Graphql do
   end
 
   defp graphql_relation_fields(e, schema, opts \\ []) do
+    skip_fun = Keyword.get(opts, :skip_fun, fn _, _ -> false  end)
+
+
     e[:relations]
     |> Enum.reject(fn rel ->
       # inside input types, we don't want to include children
-      # relations. Also we might want to skip certain entities depdencing
+      # relations. Also we might want to skip certain entities depdending
       # on the context
-      Enum.member?(
-        opts[:skip] || [],
-        rel[:target]
-      ) ||
+      skip_fun.(e, rel)  ||
         ((Entity.computed?(rel) || rel[:kind] == :has_many) &&
            (opts[:mode] == :input || opts[:mode] == :update_input))
     end)
@@ -566,10 +566,9 @@ defmodule Graphism.Graphql do
              graphql_attribute_fields(target, mode: :input, skip: [:id]) ++
                graphql_relation_fields(target, schema,
                  mode: :input,
-                 skip: [
-                   e[:name]
-                 ]
-               )
+                 skip_fun: fn _parent, rel ->
+                   e[:name] == rel[:target] && e[:name] == rel[:name]
+                 end)
            ))
         end
       end
@@ -589,10 +588,10 @@ defmodule Graphism.Graphql do
              graphql_attribute_fields(target, mode: :update) ++
                graphql_relation_fields(target, schema,
                  mode: :update_input,
-                 skip: [
-                   e[:name]
-                 ]
-               )
+                 skip_fun: fn _parent, rel ->
+                   e[:name] == rel[:target] && e[:name] == rel[:name]
+                 end)
+
            ))
         end
       end
