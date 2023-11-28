@@ -129,16 +129,22 @@ defmodule Graphism.Auth do
         context = Map.put(context, :args, args)
 
         prop =
-          paths
-          |> Enum.reduce_while(nil, fn path, _ ->
-            case context |> Map.get(path) |> evaluate(prop_spec) do
-              nil -> {:cont, nil}
-              value -> {:halt, value}
-            end
-          end)
-          |> case do
-            nil -> evaluate(context, prop_spec)
-            prop -> prop
+          case prop_spec do
+            [:@ | path] ->
+              evaluate(context, path)
+
+            _ ->
+              paths
+              |> Enum.reduce_while(nil, fn path, _ ->
+                case context |> Map.get(path) |> evaluate(prop_spec) do
+                  nil -> {:cont, nil}
+                  value -> {:halt, value}
+                end
+              end)
+              |> case do
+                nil -> evaluate(context, prop_spec)
+                prop -> prop
+              end
           end
 
         value = evaluate(context, value_spec)
