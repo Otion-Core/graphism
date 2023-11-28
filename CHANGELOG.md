@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+# v0.13.0 (Nov 28th, 2023)
+
+* Support for @ notation in scopes - [#145](https://github.com/Gravity-Core/graphism/pull/145)
+
 # v0.12.1 (Nov 28th, 2023)
 
 * Workaround truncated auth debug - [#144](https://github.com/Gravity-Core/graphism/pull/144)
