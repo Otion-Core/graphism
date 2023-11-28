@@ -156,7 +156,7 @@ defmodule Graphism.Auth do
             op: op
           ]
 
-          Logger.debug("graphism do_policy_allow?/4: #{inspect(info, pretty: true, limit: :infinity)}")
+          IO.inspect(info, pretty: true, limit: :infinity)
         end
 
         result
