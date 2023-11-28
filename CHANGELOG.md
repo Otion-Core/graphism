@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+# v0.12.1 (Nov 28th, 2023)
+
+* Workaround truncated auth debug - [#144](https://github.com/Gravity-Core/graphism/pull/144)
+
+# v0.12.0 (Nov 22nd, 2023)
+
 * Set nil on parent deletes - [#141](https://github.com/Gravity-Core/graphism/pull/141)
 * Policy evaluation debug logs - [#142](https://github.com/Gravity-Core/graphism/pull/142)
 * Smarter input types - [#143](https://github.com/Gravity-Core/graphism/pull/143)
