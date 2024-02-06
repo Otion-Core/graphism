@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+# v0.13.1 (Jan 23rd, 2024)
+
+* Fix ecto syntax for non nil values in schemas filters - [#146](https://github.com/Otion-Core/graphism/pull/146)
+
 # v0.13.0 (Nov 28th, 2023)
 
 * Support for @ notation in scopes - [#145](https://github.com/Gravity-Core/graphism/pull/145)

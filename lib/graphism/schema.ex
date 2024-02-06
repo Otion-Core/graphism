@@ -334,6 +334,12 @@ defmodule Graphism.Schema do
                 where(q, [{^binding, e}], e.unquote(column_name) == ^id)
               end
 
+              def filter(q, unquote(rel[:name]), :neq, nil, opts) do
+                binding = Keyword.get(opts, :parent, unquote(rel[:name]))
+
+                where(q, [{^binding, e}], not is_nil(e.unquote(column_name)))
+              end
+
               def filter(q, unquote(rel[:name]), :neq, id, opts) do
                 binding = Keyword.get(opts, :parent, unquote(rel[:name]))
 
