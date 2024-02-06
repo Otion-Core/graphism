@@ -2,9 +2,10 @@
 
 ## Unreleased
 
-# v0.13.1 (Jan 23rd, 2024)
+# v0.13.1 (Feb 6th, 2024)
 
 * Fix ecto syntax for non nil values in schemas filters - [#146](https://github.com/Otion-Core/graphism/pull/146)
+* Invert the order when combining queries using intersect - [#147](https://github.com/Otion-Core/graphism/pull/147)
 
 # v0.13.0 (Nov 28th, 2023)
 
