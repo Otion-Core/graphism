@@ -291,7 +291,7 @@ defmodule Graphism.Auth do
       defp combine_queries(q, nil, _), do: q
       defp combine_queries(nil, prev, _), do: prev
       defp combine_queries(q, prev, :union), do: Ecto.Query.union(q, ^prev)
-      defp combine_queries(q, prev, :intersect), do: Ecto.Query.intersect(q, ^prev)
+      defp combine_queries(q, prev, :intersect), do: Ecto.Query.intersect(prev, ^q)
     end
   end
 
