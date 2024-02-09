@@ -758,6 +758,7 @@ defmodule Graphism.Entity do
   def attribute({:boolean, _, [name]}), do: attribute([name, :boolean])
   def attribute({:float, _, [name]}), do: attribute([name, :float])
   def attribute({:datetime, _, [name]}), do: attribute([name, :datetime])
+  def attribute({:time, _, [name]}), do: attribute([name, :time])
   def attribute({:date, _, [name]}), do: attribute([name, :date])
   def attribute({:decimal, _, [name]}), do: attribute([name, :decimal])
   def attribute({:upload, _, [name]}), do: attribute([name, :upload, [modifiers: [:virtual]]])
@@ -920,7 +921,7 @@ defmodule Graphism.Entity do
   end
 
   def with_action_args(opts, _entity_name) do
-    args  = opts[:args] || []
+    args = opts[:args] || []
 
     if opts[:produces] && Enum.empty?(args) && !action_of_kind?(opts, :list) do
       Keyword.put(opts, :args, [:id])
@@ -1127,7 +1128,8 @@ defmodule Graphism.Entity do
   def list_from(_, _), do: nil
 
   def list_from(name, opts, entity_name) do
-    opts = (opts || [])
+    opts =
+      (opts || [])
       |> Keyword.put(:kind, [:query, :read, :list])
       |> Keyword.put(:produces, {:list, entity_name})
 

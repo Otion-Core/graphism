@@ -406,6 +406,9 @@ defmodule Graphism do
   defmacro date(_name, _opts \\ []) do
   end
 
+  defmacro time(_name, _opts \\ []) do
+  end
+
   defmacro decimal(_name, _opts \\ []) do
   end
 
