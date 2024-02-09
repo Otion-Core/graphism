@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+# v0.13.2 (Feb 9th, 2024)
+
+* Add support for the Time datatype - [#148](https://github.com/Otion-Core/graphism/pull/148)
+
 # v0.13.1 (Feb 6th, 2024)
 
 * Fix ecto syntax for non nil values in schemas filters - [#146](https://github.com/Otion-Core/graphism/pull/146)
