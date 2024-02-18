@@ -226,12 +226,54 @@ Computed attributes are part of your schema, they are stored, and can also be qu
 
 However, since they are computed, they won't be included in your mutations, therefore it is not possible to modify their values explicitly.
 
+In order to set the initial value of a computed attribute, a `:before` or `:after` action hook can be used:
+
 ```elixir
 entity :post do
-  computed(boolean(:draft, default: true)
-  ...
+  computed(boolean(:draft))
+
+  action :create, before: [MarkAsDraft] do
+  end
 end
 ```
+
+Alternatively, a `:using` hook can be specified at the field level:
+
+```elixir
+entity :post do
+  computed(boolean(:draft), using: MarkAsDraft)
+end
+```
+
+### Computed relations
+
+Relations can also be declared as computed in two different ways, explicitly and implicitly. Explict computed relations are declared with a `:using` hook:
+
+```elixir
+entity :post do
+  belongs_to(:blog)
+  computed(belongs_to(:user), using: SetUserFromBlog)
+end
+```
+
+Alternatively, relations can also be implicitly populated from the context:
+
+```elixir
+entity :post do
+  belongs_to(:blog)
+  belongs_to(:user, from_context: [:current_user]])
+end
+```
+
+but also from other relations:
+
+```elixir
+entity :post do
+  belongs_to(:blog)
+  belongs_to(:user, from: :blog])
+end
+```
+
 
 ### Slugs
 
