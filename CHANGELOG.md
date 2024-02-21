@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+* Pass context to api functions - [#150](https://github.com/Otion-Core/graphism/pull/150)
+
 # v0.13.2 (Feb 9th, 2024)
 
 * Add support for the Time datatype - [#148](https://github.com/Otion-Core/graphism/pull/148)

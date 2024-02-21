@@ -569,7 +569,7 @@ defmodule Graphism.Api do
     refetch =
       if Entity.refetch?(e) do
         quote do
-          {:ok, unquote(Ast.var(e))} <- get_by_id(unquote(Ast.var(e)).id, opts)
+          {:ok, unquote(Ast.var(e))} <- get_by_id(unquote(Ast.var(e)).id, context)
         end
       else
         nil
@@ -587,8 +587,10 @@ defmodule Graphism.Api do
                 |> Ast.vars()
               ),
               unquote(Ast.var(:attrs)),
-              opts \\ []
+              unquote(Ast.var(:context)) \\ %{}
             ) do
+          opts = unquote(Ast.var(:context))[:opts] || []
+
           unquote(repo_module).transaction(fn ->
             with unquote_splicing(
                    [
@@ -616,7 +618,9 @@ defmodule Graphism.Api do
   defp with_api_batch_create_fun(funs, _e, schema_module, repo_module, _schema) do
     fun =
       quote do
-        def batch_create(items, opts \\ []) do
+        def batch_create(items, context \\ %{}) do
+          opts = context[:opts] || []
+
           with {count, _} <- unquote(repo_module).insert_all(unquote(schema_module), items, opts) do
             {:ok, count}
           end
@@ -659,8 +663,10 @@ defmodule Graphism.Api do
               ),
               unquote(Ast.var(e)),
               unquote(Ast.var(:attrs)),
-              opts \\ []
+              unquote(Ast.var(:context)) \\ %{}
             ) do
+
+          opts = unquote(Ast.var(:context))[:opts] || []
           unquote(repo_module).transaction(fn ->
             with unquote_splicing(
                    [
@@ -694,12 +700,14 @@ defmodule Graphism.Api do
         {:ok, unquote(Ast.var(:attrs))} <-
           unquote(Ast.var(:attrs))
           |> unquote(schema_module).delete_changeset()
-          |> unquote(repo_module).delete()
+          |> unquote(repo_module).delete(opts)
       end
 
     fun =
       quote do
-        def delete(%unquote(schema_module){} = unquote(Ast.var(:attrs))) do
+        def delete(%unquote(schema_module){} = unquote(Ast.var(:attrs)), unquote(Ast.var(:context)) \\ %{}) do
+          opts = unquote(Ast.var(:context))[:opts] || []
+
           unquote(repo_module).transaction(fn ->
             with unquote_splicing(
                    [
@@ -807,7 +815,9 @@ defmodule Graphism.Api do
     preloads = Entity.preloads(e)
 
     quote do
-      def get_by_id(id, opts \\ []) do
+      def get_by_id(id, context \\ %{}) do
+        opts = context[:opts] || []
+
         preloads =
           if opts[:skip_preloads] do
             []
@@ -830,8 +840,8 @@ defmodule Graphism.Api do
 
   defp get_by_id_bang_api_fun(schema_module) do
     quote do
-      def get_by_id!(id, opts \\ []) do
-        case get_by_id(id, opts) do
+      def get_by_id!(id, context \\ %{}) do
+        case get_by_id(id, context) do
           {:ok, e} ->
             e
 
@@ -873,7 +883,9 @@ defmodule Graphism.Api do
         end)
 
       quote do
-        def unquote(fun_name)(unquote_splicing(args), opts \\ []) do
+        def unquote(fun_name)(unquote_splicing(args), context \\ %{}) do
+          opts = context[:preloads] || []
+
           preloads =
             if opts[:skip_preloads] do
               []
@@ -916,7 +928,7 @@ defmodule Graphism.Api do
           ]
 
       quote do
-        def unquote(String.to_atom("get_by_#{attr[:name]}"))(unquote_splicing(args), opts \\ []) do
+        def unquote(String.to_atom("get_by_#{attr[:name]}"))(unquote_splicing(args), context \\ %{}) do
           value =
             case is_atom(unquote(Ast.var(attr))) do
               true ->
@@ -945,10 +957,10 @@ defmodule Graphism.Api do
           ]
 
           preloads =
-            if opts[:skip_preloads] do
+            if context[:skip_preloads] do
               []
             else
-              unquote(preloads) ++ (opts[:preload] || [])
+              unquote(preloads) ++ (context[:preload] || [])
             end
 
           case unquote(schema_module)
