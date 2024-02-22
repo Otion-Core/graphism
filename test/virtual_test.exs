@@ -8,7 +8,7 @@ defmodule VirtualTest do
     end
 
     defmodule Describe do
-      def execute(_args) do
+      def execute(_args, _context) do
         [%{name: "My Blog"}]
       end
     end

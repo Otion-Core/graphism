@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+* Pass context to api functions - [#150](https://github.com/Otion-Core/graphism/pull/150)
 * Improved support for computed fields - [#149](https://github.com/Otion-Core/graphism/pull/149)
 
 # v0.13.2 (Feb 9th, 2024)

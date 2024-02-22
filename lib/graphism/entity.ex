@@ -365,19 +365,19 @@ defmodule Graphism.Entity do
 
   defp hook_call(e, mod, :before, :update) do
     quote do
-      {:ok, unquote(Ast.var(:attrs))} <- unquote(mod).execute(unquote(Ast.var(e)), unquote(Ast.var(:attrs)))
+      {:ok, unquote(Ast.var(:attrs))} <- unquote(mod).execute(unquote(Ast.var(e)), unquote(Ast.var(:attrs)), unquote(Ast.var(:context)))
     end
   end
 
   defp hook_call(_, mod, :before, _) do
     quote do
-      {:ok, unquote(Ast.var(:attrs))} <- unquote(mod).execute(unquote(Ast.var(:attrs)))
+      {:ok, unquote(Ast.var(:attrs))} <- unquote(mod).execute(unquote(Ast.var(:attrs)), unquote(Ast.var(:context)))
     end
   end
 
   defp hook_call(e, mod, :after, _) do
     quote do
-      {:ok, unquote(Ast.var(e))} <- unquote(mod).execute(unquote(Ast.var(e)))
+      {:ok, unquote(Ast.var(e))} <- unquote(mod).execute(unquote(Ast.var(e)), unquote(Ast.var(:context)))
     end
   end
 
