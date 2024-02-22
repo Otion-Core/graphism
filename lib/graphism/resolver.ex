@@ -30,7 +30,7 @@ defmodule Graphism.Resolver do
       defmodule unquote(e[:resolver_module]) do
         (unquote_splicing(resolver_funs))
       end
-    end  |> Ast.print(e[:name] == :folder)
+    end
   end
 
   defp with_resolver_pagination_fun(funs) do
@@ -553,7 +553,7 @@ defmodule Graphism.Resolver do
               mod = rel[:opts][:using]
 
               quote do
-                {:ok, unquote(Ast.var(rel))} <- unquote(mod).execute(args, context)
+                {:ok, unquote(Ast.var(rel))} <- unquote(mod).execute(unquote(Ast.var(:args)), context)
               end
 
             rel[:opts][:from] != nil ->
@@ -575,7 +575,7 @@ defmodule Graphism.Resolver do
               end
 
             true ->
-              raise "relation #{rel[:name]} of #{e[:name]} is computed but does not specify a :using or a :from option"
+              raise "Relation #{inspect(rel[:name])} of entity #{inspect(e[:name])} is computed, but does not specify a :using or a :from option"
           end
 
         false ->
@@ -627,6 +627,7 @@ defmodule Graphism.Resolver do
                             {:ok, unquote(api_module).relation(unquote(Ast.var(e)), unquote(rel[:name]))}
                           end
                         end
+
                       _ ->
                         quote do
                           case Map.get(unquote(Ast.var(:args)), unquote(arg_name), nil) do
