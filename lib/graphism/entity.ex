@@ -740,10 +740,23 @@ defmodule Graphism.Entity do
     put_in(attr, [:opts, :modifiers], modifiers)
   end
 
+  def attribute({:computed, _, [opts, [using: {:__aliases__, _, using}]]}) do
+    with attr when not is_nil(attr) <- attribute(opts) do
+      modifiers = [:computed | get_in(attr, [:opts, :modifiers]) || []]
+      using = Module.concat(using)
+
+      attr
+      |> put_in([:opts, :modifiers], modifiers)
+      |> put_in([:opts, :using], using)
+    end
+  end
+
   def attribute({:computed, _, [opts]}) do
-    attr = attribute(opts)
-    modifiers = [:computed | get_in(attr, [:opts, :modifiers]) || []]
-    put_in(attr, [:opts, :modifiers], modifiers)
+    with attr when not is_nil(attr) <- attribute(opts) do
+      modifiers = [:computed | get_in(attr, [:opts, :modifiers]) || []]
+
+      put_in(attr, [:opts, :modifiers], modifiers)
+    end
   end
 
   def attribute({:private, _, [opts]}) do
@@ -887,6 +900,25 @@ defmodule Graphism.Entity do
     opts = rel[:opts] || []
     opts = Keyword.put(opts, :preloaded, true)
     Keyword.put(rel, :opts, opts)
+  end
+
+  def relation_from({:computed, _, [opts, [using: {:__aliases__, _, using}]]}) do
+    with rel when not is_nil(rel) <- relation_from(opts) do
+      modifiers = get_in(rel, [:opts, :modifiers]) || []
+      using = Module.concat(using)
+
+      rel
+      |> put_in([:opts, :modifiers], [:computed | modifiers])
+      |> put_in([:opts, :using], using)
+    end
+  end
+
+  def relation_from({:computed, _, [opts]}) do
+    with rel when not is_nil(rel) <- relation_from(opts) do
+      modifiers = get_in(rel, [:opts, :modifiers]) || []
+
+      put_in(rel, [:opts, :modifiers], [:computed | modifiers])
+    end
   end
 
   def relation_from(_), do: nil
