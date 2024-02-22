@@ -36,7 +36,6 @@ defmodule Graphism.Api do
         end
 
       true ->
-
         api_funs =
           e
           |> with_virtual_api_custom_funs()
@@ -665,8 +664,8 @@ defmodule Graphism.Api do
               unquote(Ast.var(:attrs)),
               unquote(Ast.var(:context)) \\ %{}
             ) do
-
           opts = unquote(Ast.var(:context))[:opts] || []
+
           unquote(repo_module).transaction(fn ->
             with unquote_splicing(
                    [
@@ -697,7 +696,7 @@ defmodule Graphism.Api do
 
     delete =
       quote do
-        {:ok, unquote(Ast.var(:attrs))} <-
+        {:ok, unquote(Ast.var(e))} <-
           unquote(Ast.var(:attrs))
           |> unquote(schema_module).delete_changeset()
           |> unquote(repo_module).delete(opts)
@@ -705,7 +704,10 @@ defmodule Graphism.Api do
 
     fun =
       quote do
-        def delete(%unquote(schema_module){} = unquote(Ast.var(:attrs)), unquote(Ast.var(:context)) \\ %{}) do
+        def delete(
+              %unquote(schema_module){} = unquote(Ast.var(:attrs)),
+              unquote(Ast.var(:context)) \\ %{}
+            ) do
           opts = unquote(Ast.var(:context))[:opts] || []
 
           unquote(repo_module).transaction(fn ->
@@ -718,7 +720,7 @@ defmodule Graphism.Api do
                    |> List.flatten()
                    |> Enum.reject(&is_nil/1)
                  ) do
-              unquote(Ast.var(:attrs))
+              unquote(Ast.var(e))
             else
               {:error, e} ->
                 unquote(repo_module).rollback(e)
@@ -726,12 +728,12 @@ defmodule Graphism.Api do
           end)
         end
       end
+      |> Ast.print(e[:name] == :feature)
 
     [fun | funs]
   end
 
   defp with_api_custom_funs(funs, e, schema_module, repo_module, schema, auth_module) do
-
     custom_action_funs =
       e
       |> Entity.custom_mutations()
@@ -759,7 +761,6 @@ defmodule Graphism.Api do
       api_custom_action_fun(e, action, action_opts)
     end)
   end
-
 
   defp api_custom_action_fun(e, action, opts) do
     using_mod = opts[:using]
