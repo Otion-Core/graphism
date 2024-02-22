@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+# v0.14.0 (Feb 22nd, 2024)
+
 * Pass context to api functions - [#150](https://github.com/Otion-Core/graphism/pull/150)
 * Improved support for computed fields - [#149](https://github.com/Otion-Core/graphism/pull/149)
 * Fix variable naming in delete api with after hooks - [#151](https://github.com/Otion-Core/graphism/pull/151)
