@@ -426,6 +426,7 @@ defmodule Graphism.Schema do
     end
   end
 
+  defp ecto_datatype(:bigint), do: :integer
   defp ecto_datatype(:datetime), do: :utc_datetime
   defp ecto_datatype(other), do: other
 

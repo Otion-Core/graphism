@@ -394,6 +394,9 @@ defmodule Graphism do
   defmacro integer(_name, _opts \\ []) do
   end
 
+  defmacro bigint(_name, _opts \\ []) do
+  end
+
   defmacro float(_name, _opts \\ []) do
   end
 

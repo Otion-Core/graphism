@@ -115,7 +115,10 @@ defmodule Graphism.Entity do
 
   def boolean?(attr), do: attr[:kind] == :boolean
   def enum?(attr), do: attr[:opts][:one_of] != nil
-  def attr_graphql_type(attr), do: attr[:opts][:one_of] || attr[:kind]
+  def attr_graphql_type(attr), do: attr[:opts][:one_of] || graphql_data_type(attr[:kind])
+  defp graphql_data_type(:bigint), do: :integer
+  defp graphql_data_type(other), do: other
+
   def has_default?(attr), do: Keyword.has_key?(attr[:opts], :default)
 
   defp modifier?(any, modifier), do: any |> modifiers() |> Enum.member?(modifier)
@@ -768,6 +771,7 @@ defmodule Graphism.Entity do
   def attribute({:string, _, [name]}), do: attribute([name, :string])
   def attribute({:text, _, [name]}), do: attribute([name, :string, [store: :text]])
   def attribute({:integer, _, [name]}), do: attribute([name, :integer])
+  def attribute({:bigint, _, [name]}), do: attribute([name, :bigint])
   def attribute({:boolean, _, [name]}), do: attribute([name, :boolean])
   def attribute({:float, _, [name]}), do: attribute([name, :float])
   def attribute({:datetime, _, [name]}), do: attribute([name, :datetime])
