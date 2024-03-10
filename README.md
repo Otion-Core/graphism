@@ -173,6 +173,36 @@ Keep reading if you want to learn about all the features offered by Graphism...
 
 ## Schema Features
 
+### Attribute types
+
+The following attribute types are supported:
+
+* `string`
+* `text`
+* `integer`
+* `bigint`
+* `decimal`
+* `float`
+* `boolean`
+* `datetime`
+* `date`
+* `time`
+* `upload`
+* `json`
+* `slug`
+
+Each of these types offers its own macro, for example:
+
+```elixir
+entity :event do
+  string(:title)
+  text(:description)
+  boolean(:confirmed)
+  datetime(:scheduled_at)
+  ...
+end
+```
+
 ### Unique attributes
 
 If you wish to ensure unicity, you can declare a field being `:unique`:

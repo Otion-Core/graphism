@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+* Bigint attributes - [#153](https://github.com/Otion-Core/graphism/pull/153)
+
 # v0.14.0 (Feb 22nd, 2024)
 
 * Pass context to api functions - [#150](https://github.com/Otion-Core/graphism/pull/150)

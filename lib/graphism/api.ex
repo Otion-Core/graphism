@@ -728,7 +728,6 @@ defmodule Graphism.Api do
           end)
         end
       end
-      |> Ast.print(e[:name] == :feature)
 
     [fun | funs]
   end
