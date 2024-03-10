@@ -38,7 +38,7 @@ defmodule Graphism.Dataloader do
         end
 
         def run(%__MODULE__{specs: specs, cache: old_cache} = loader, context \\ %{}) do
-          contet = context = Map.drop(context, [:loader, :__absinthe_plug__, :pubsub])
+          context = Map.drop(context, [:loader, :__absinthe_plug__, :pubsub])
 
           to_query =
             specs

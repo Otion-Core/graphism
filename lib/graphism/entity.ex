@@ -368,7 +368,8 @@ defmodule Graphism.Entity do
 
   defp hook_call(e, mod, :before, :update) do
     quote do
-      {:ok, unquote(Ast.var(:attrs))} <- unquote(mod).execute(unquote(Ast.var(e)), unquote(Ast.var(:attrs)), unquote(Ast.var(:context)))
+      {:ok, unquote(Ast.var(:attrs))} <-
+        unquote(mod).execute(unquote(Ast.var(e)), unquote(Ast.var(:attrs)), unquote(Ast.var(:context)))
     end
   end
 
@@ -728,19 +729,27 @@ defmodule Graphism.Entity do
     end
   end
 
-  def attribute({:virtual, _, [opts]}) do
-    with attr when attr != nil <- attribute(opts) do
-      modifiers = [:virtual | get_in(attr, [:opts, :modifiers]) || []]
-      put_in(attr, [:opts, :modifiers], modifiers)
-    end
-  end
-
   def attribute({:optional, _, [{:belongs_to, _, _}]}), do: nil
 
   def attribute({:optional, _, [opts]}) do
     attr = attribute(opts)
     modifiers = [:optional | get_in(attr, [:opts, :modifiers]) || []]
     put_in(attr, [:opts, :modifiers], modifiers)
+  end
+
+  def attribute({:virtual, _, [opts, [using: {:__aliases__, _, using}]]}) do
+    with attr when attr != nil <- attribute(opts) do
+      modifiers = [:virtual | get_in(attr, [:opts, :modifiers]) || []]
+      using = Module.concat(using)
+
+      attr
+      |> put_in([:opts, :modifiers], modifiers)
+      |> put_in([:opts, :using], using)
+    end
+  end
+
+  def attribute({:virtual, _, [opts]}) do
+    raise "attribute was defined as virtual but no :using hook was provided: #{inspect(opts)}"
   end
 
   def attribute({:computed, _, [opts, [using: {:__aliases__, _, using}]]}) do
@@ -931,7 +940,7 @@ defmodule Graphism.Entity do
     computed? =
       get_in(field, [:opts, :from]) ||
         get_in(field, [:opts, :from_context]) ||
-        get_in(field, [:opts, :using])
+        (!virtual?(field) && get_in(field, [:opts, :using]))
 
     if computed?, do: with_modifier(field, :computed), else: field
   end
