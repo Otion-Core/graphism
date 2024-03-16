@@ -112,22 +112,36 @@ defmodule Graphism.Graphql do
             kind
         end
 
-      quote do
-        field(unquote(attr[:name]), unquote(kind))
+      if Entity.virtual?(attr) && get_in(attr, [:opts, :using]) do
+        hook = get_in(attr, [:opts, :using])
+
+        quote do
+          field(
+            unquote(attr[:name]),
+            unquote(kind),
+            resolve: fn parent, args, %{context: context} ->
+              context = Map.drop(context, [:loader, :__absinthe_plug__, :pubsub])
+              unquote(hook).execute(parent, context)
+            end
+          )
+        end
+      else
+        quote do
+          field(unquote(attr[:name]), unquote(kind))
+        end
       end
     end)
   end
 
   defp graphql_relation_fields(e, schema, opts \\ []) do
-    skip_fun = Keyword.get(opts, :skip_fun, fn _, _ -> false  end)
-
+    skip_fun = Keyword.get(opts, :skip_fun, fn _, _ -> false end)
 
     e[:relations]
     |> Enum.reject(fn rel ->
       # inside input types, we don't want to include children
       # relations. Also we might want to skip certain entities depdending
       # on the context
-      skip_fun.(e, rel)  ||
+      skip_fun.(e, rel) ||
         ((Entity.computed?(rel) || rel[:kind] == :has_many) &&
            (opts[:mode] == :input || opts[:mode] == :update_input))
     end)
@@ -556,6 +570,7 @@ defmodule Graphism.Graphql do
   defp graphql_input_types(e, schema) do
     e[:relations]
     |> Enum.filter(fn rel -> :has_many == rel[:kind] && Entity.inline_relation?(rel, :create) end)
+    |> Enum.reject(&(Entity.virtual?(&1) && get_in(&1, [:opts, :using])))
     |> Enum.map(fn rel ->
       target = Entity.find_entity!(schema, rel[:target])
       input_type = String.to_atom("#{target[:name]}_input")
@@ -568,7 +583,8 @@ defmodule Graphism.Graphql do
                  mode: :input,
                  skip_fun: fn _parent, rel ->
                    e[:name] == rel[:target] && e[:name] == rel[:name]
-                 end)
+                 end
+               )
            ))
         end
       end
@@ -578,6 +594,7 @@ defmodule Graphism.Graphql do
   defp graphql_update_input_types(e, schema) do
     e[:relations]
     |> Enum.filter(fn rel -> :has_many == rel[:kind] && Entity.inline_relation?(rel, :update) end)
+    |> Enum.reject(&(Entity.virtual?(&1) && get_in(&1, [:opts, :using])))
     |> Enum.map(fn rel ->
       target = Entity.find_entity!(schema, rel[:target])
       input_type = String.to_atom("#{target[:name]}_update_input")
@@ -590,8 +607,8 @@ defmodule Graphism.Graphql do
                  mode: :update_input,
                  skip_fun: fn _parent, rel ->
                    e[:name] == rel[:target] && e[:name] == rel[:name]
-                 end)
-
+                 end
+               )
            ))
         end
       end
@@ -732,16 +749,19 @@ defmodule Graphism.Graphql do
           maybe_client_generated_id_arg(e) ++
             (e[:attributes]
              |> Enum.reject(fn attr -> attr[:name] == :id end)
-             |> Enum.reject(&Entity.computed?(&1))
+             |> Enum.reject(&Entity.computed?/1)
+             |> Enum.reject(&(Entity.virtual?(&1) && get_in(&1, [:opts, :using])))
              |> Enum.map(&mutation_arg_from_attribute(e, &1))) ++
             (e[:relations]
              |> Enum.filter(fn rel -> :belongs_to == rel[:kind] end)
-             |> Enum.reject(&Entity.computed?(&1))
+             |> Enum.reject(&Entity.computed?/1)
+             |> Enum.reject(&(Entity.virtual?(&1) && get_in(&1, [:opts, :using])))
              |> Enum.map(&mutation_arg_from_relation(schema, e, &1, :create))) ++
             (e[:relations]
              |> Enum.filter(fn rel ->
                :has_many == rel[:kind] && Entity.inline_relation?(rel, :create)
              end)
+             |> Enum.reject(&(Entity.virtual?(&1) && get_in(&1, [:opts, :using])))
              |> Enum.map(&mutation_arg_from_inlined_relation(e, &1)))
         )
 
@@ -761,9 +781,10 @@ defmodule Graphism.Graphql do
             end
           ] ++
             (e[:attributes]
-             |> Enum.reject(fn attr ->
-               attr[:name] == :id || Entity.computed?(attr) || Entity.immutable?(attr)
-             end)
+             |> Enum.reject(&(&1[:name] == :id))
+             |> Enum.reject(&Entity.computed?/1)
+             |> Enum.reject(&(Entity.virtual?(&1) && get_in(&1, [:opts, :using])))
+             |> Enum.reject(&Entity.immutable?/1)
              |> Enum.map(fn attr ->
                kind = Entity.attr_graphql_type(attr)
 
@@ -776,7 +797,9 @@ defmodule Graphism.Graphql do
              end)) ++
             (e[:relations]
              |> Enum.filter(fn rel -> :belongs_to == rel[:kind] end)
-             |> Enum.reject(&(Entity.computed?(&1) || Entity.immutable?(&1)))
+             |> Enum.reject(&Entity.computed?/1)
+             |> Enum.reject(&(Entity.virtual?(&1) && get_in(&1, [:opts, :using])))
+             |> Enum.reject(&Entity.immutable?/1)
              |> Enum.map(fn rel ->
                quote do
                  arg(unquote(rel[:name]), :id)
@@ -786,6 +809,7 @@ defmodule Graphism.Graphql do
              |> Enum.filter(fn rel ->
                :has_many == rel[:kind] && Entity.inline_relation?(rel, :update)
              end)
+             |> Enum.reject(&Entity.virtual?/1)
              |> Enum.map(fn rel ->
                input_type = String.to_atom("#{rel[:target]}_update_input")
 
