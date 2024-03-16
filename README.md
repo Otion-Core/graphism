@@ -308,7 +308,7 @@ end
 
 ### Virtual attributes
 
-Virtual are similar to computed attributes in the sense that they are also part of your schema, and can be queried, however they are not stored:
+Virtual attributes are similar to computed attributes in the sense that they are also part of your schema, and can be queried, however they are not stored:
 
 ```elixir
 entity :post do
@@ -347,6 +347,25 @@ entity :node do
   ...
 end
 ```
+
+### Virtual relations
+
+Virtual relations work exactly the same as virtual attributes.
+
+Since they are not persisted, virtual relations are ignored in mutations, migrations, lists and
+aggregation queries.
+
+For example if you define a virtual parent relation:
+
+```elixir
+entity :blog do
+  virtual(belongs_to(:post))
+end
+```
+
+then Graphism won't generate the usual `listByPost` or `aggregateByPost` queries for the `blog`
+entity.
+
 
 ### Sorting results
 

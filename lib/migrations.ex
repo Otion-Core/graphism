@@ -4,6 +4,7 @@ defmodule Graphism.Migrations do
   Graphism schema
   """
   require Logger
+  alias Graphism.Entity
 
   @doc """
   Generate migrations for the given schema.
@@ -122,8 +123,9 @@ defmodule Graphism.Migrations do
     # convert entity relations as foreign keys
     # to be added to the table migrations
     m =
-      e[:relations]
-      |> Enum.filter(fn rel -> :belongs_to == rel[:kind] end)
+      e
+      |> Entity.parent_relations()
+      |> Enum.reject(&Entity.virtual?/1)
       |> Enum.reduce(m, fn rel, m ->
         name = column_name_from_relation(rel)
         opts = column_opts_from_relation(rel, index)

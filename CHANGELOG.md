@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Virtual relations - [#155](https://github.com/Otion-Core/graphism/pull/155)
 - Virtual attributes - [#154](https://github.com/Otion-Core/graphism/pull/154)
 - Bigint attributes - [#153](https://github.com/Otion-Core/graphism/pull/153)
 
