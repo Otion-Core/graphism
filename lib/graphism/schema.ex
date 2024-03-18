@@ -17,6 +17,7 @@ defmodule Graphism.Schema do
   def schema_module(e, schema) do
     indices = Migrations.indices_from_attributes(e) ++ Migrations.indices_from_keys(e)
     stored_attributes = Enum.reject(e[:attributes], fn attr -> attr[:name] == :id or Entity.virtual?(attr) end)
+    stored_relations = Enum.reject(e[:relations], &Entity.virtual?/1)
     scope_columns = Enum.map(e[:opts][:scope] || [], fn col -> String.to_atom("#{col}_id") end)
     schema_module = Keyword.fetch!(e, :schema_module)
 
@@ -69,7 +70,7 @@ defmodule Graphism.Schema do
           )
 
           unquote_splicing(
-            e[:relations]
+            stored_relations
             |> Enum.map(fn rel ->
               target = Entity.find_entity!(schema, rel[:target])
               schema_module = target[:schema_module]
@@ -113,6 +114,7 @@ defmodule Graphism.Schema do
                             end)) ++
                              (e
                               |> Entity.parent_relations()
+                              |> Enum.reject(&Entity.virtual?(&1))
                               |> Enum.reject(&Entity.optional?(&1))
                               |> Enum.map(fn rel ->
                                 String.to_atom("#{rel[:name]}_id")
@@ -122,13 +124,13 @@ defmodule Graphism.Schema do
         @optional_fields unquote(
                            (e[:attributes]
                             |> Enum.filter(&Entity.optional?(&1))
+                            |> Enum.reject(&Entity.virtual?(&1))
                             |> Enum.map(fn attr ->
                               attr[:name]
                             end)) ++
-                             (e[:relations]
-                              |> Enum.filter(fn rel ->
-                                rel[:kind] == :belongs_to
-                              end)
+                             (e
+                              |> Entity.parent_relations()
+                              |> Enum.reject(&Entity.virtual?(&1))
                               |> Enum.filter(&Entity.optional?(&1))
                               |> Enum.map(fn rel ->
                                 String.to_atom("#{rel[:name]}_id")

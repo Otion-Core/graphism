@@ -101,6 +101,7 @@ defmodule Graphism.Resolver do
   defp resolver_list_by_parent_auth_funs(e, _opts, _schema, auth_module) do
     e
     |> Entity.parent_relations()
+    |> Enum.reject(&Entity.virtual?/1)
     |> Enum.map(fn rel ->
       fun_name = String.to_atom("should_list_by_#{rel[:name]}?")
 
@@ -115,10 +116,10 @@ defmodule Graphism.Resolver do
   defp auth_fun_entities_arg_names(e, action, opts) do
     cond do
       action == :update ->
-        (e |> Entity.parent_relations() |> Entity.names()) ++ [e[:name]]
+        (e |> Entity.parent_relations() |> Enum.reject(&Entity.virtual?/1) |> Entity.names()) ++ [e[:name]]
 
       action == :create ->
-        e |> Entity.parent_relations() |> Entity.names()
+        e |> Entity.parent_relations() |> Enum.reject(&Entity.virtual?/1) |> Entity.names()
 
       action == :read || action == :delete || has_id_arg?(opts) ->
         [e[:name]]
@@ -307,6 +308,7 @@ defmodule Graphism.Resolver do
   defp resolver_list_by_relation_funs(e, schema, api_module) do
     e
     |> Entity.parent_relations()
+    |> Enum.reject(&Entity.virtual?/1)
     |> Enum.map(fn rel ->
       target = Entity.find_entity!(schema, rel[:target])
       fun_name = String.to_atom("list_by_#{rel[:name]}")
@@ -375,6 +377,7 @@ defmodule Graphism.Resolver do
   defp resolver_aggregate_by_relation_funs(e, schema, api_module) do
     e
     |> Entity.parent_relations()
+    |> Enum.reject(&Entity.virtual?/1)
     |> Enum.map(fn rel ->
       target = Entity.find_entity!(schema, rel[:target])
       fun_name = String.to_atom("aggregate_by_#{rel[:name]}")
@@ -492,6 +495,7 @@ defmodule Graphism.Resolver do
   defp with_parent_entities_fetch(e, schema, opts) do
     e
     |> Entity.parent_relations()
+    |> Enum.reject(&Entity.virtual?/1)
     |> with_parent_entities_fetch_from_rels(e, schema, opts)
   end
 
@@ -653,7 +657,7 @@ defmodule Graphism.Resolver do
   # have been removed, since they should have already been resolved
   # by their ids.
   defp with_args_without_parents(e) do
-    case e |> Entity.parent_relations() |> Entity.names() do
+    case e |> Entity.parent_relations() |> Enum.reject(&Entity.virtual?/1) |> Entity.names() do
       [] ->
         nil
 
@@ -770,7 +774,11 @@ defmodule Graphism.Resolver do
                   quote do
                     unquote(api_module).create(
                       unquote_splicing(
-                        (e |> Entity.parent_relations() |> Entity.names() |> Ast.vars()) ++ [Ast.var(:args)]
+                        (e
+                         |> Entity.parent_relations()
+                         |> Enum.reject(&Entity.virtual?/1)
+                         |> Entity.names()
+                         |> Ast.vars()) ++ [Ast.var(:args)]
                       )
                     )
                   end
@@ -787,7 +795,11 @@ defmodule Graphism.Resolver do
                       with {:ok, unquote(Ast.var(e))} <-
                              unquote(api_module).create(
                                unquote_splicing(
-                                 (e |> Entity.parent_relations() |> Entity.names() |> Ast.vars()) ++
+                                 (e
+                                  |> Entity.parent_relations()
+                                  |> Enum.reject(&Entity.virtual?/1)
+                                  |> Entity.names()
+                                  |> Ast.vars()) ++
                                    [Ast.var(:args)]
                                )
                              ),
@@ -840,7 +852,11 @@ defmodule Graphism.Resolver do
                     quote do
                       unquote(api_module).update(
                         unquote_splicing(
-                          (e |> Entity.parent_relations() |> Entity.names() |> Ast.vars()) ++
+                          (e
+                           |> Entity.parent_relations()
+                           |> Enum.reject(&Entity.virtual?/1)
+                           |> Entity.names()
+                           |> Ast.vars()) ++
                             [Ast.var(e), Ast.var(:args)]
                         )
                       )
@@ -858,7 +874,11 @@ defmodule Graphism.Resolver do
                         with {:ok, unquote(Ast.var(e))} <-
                                unquote(api_module).update(
                                  unquote_splicing(
-                                   (e |> Entity.parent_relations() |> Entity.names() |> Ast.vars()) ++
+                                   (e
+                                    |> Entity.parent_relations()
+                                    |> Enum.reject(&Entity.virtual?/1)
+                                    |> Entity.names()
+                                    |> Ast.vars()) ++
                                      [Ast.var(e), Ast.var(:args)]
                                  )
                                ),

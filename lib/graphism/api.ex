@@ -583,6 +583,7 @@ defmodule Graphism.Api do
               unquote_splicing(
                 e
                 |> Entity.parent_relations()
+                |> Enum.reject(&Entity.virtual?/1)
                 |> Ast.vars()
               ),
               unquote(Ast.var(:attrs)),
@@ -658,6 +659,7 @@ defmodule Graphism.Api do
               unquote_splicing(
                 e
                 |> Entity.parent_relations()
+                |> Enum.reject(&Entity.virtual?/1)
                 |> Ast.vars()
               ),
               unquote(Ast.var(e)),

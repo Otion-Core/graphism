@@ -405,7 +405,7 @@ defmodule Graphism.Entity do
   end
 
   def attrs_with_parent_relations(e) do
-    rels = parent_relations(e)
+    rels = e |> parent_relations() |> Enum.reject(&virtual?/1)
 
     attrs_with_required_parent_relations(rels) ++ attrs_with_optional_parent_relations(rels)
   end
@@ -932,6 +932,21 @@ defmodule Graphism.Entity do
 
       put_in(rel, [:opts, :modifiers], [:computed | modifiers])
     end
+  end
+
+  def relation_from({:virtual, _, [opts, [using: {:__aliases__, _, using}]]}) do
+    with rel when rel != nil <- relation_from(opts) do
+      modifiers = [:virtual | get_in(rel, [:opts, :modifiers]) || []]
+      using = Module.concat(using)
+
+      rel
+      |> put_in([:opts, :modifiers], modifiers)
+      |> put_in([:opts, :using], using)
+    end
+  end
+
+  def relation_from({:virtual, _, [opts]}) do
+    raise "relation was defined as virtual but no :using hook was provided: #{inspect(opts)}"
   end
 
   def relation_from(_), do: nil

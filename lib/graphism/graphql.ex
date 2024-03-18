@@ -44,7 +44,8 @@ defmodule Graphism.Graphql do
         (unquote_splicing(
            graphql_attribute_fields(e) ++
              graphql_timestamp_fields() ++
-             graphql_relation_fields(e, schema)
+             graphql_relation_fields(e, schema) ++
+             graphql_virtual_relation_fields(e)
          ))
       end
     end
@@ -133,10 +134,35 @@ defmodule Graphism.Graphql do
     end)
   end
 
+  defp graphql_relation_kind(rel, optional) do
+    case {rel[:kind], optional} do
+      {:has_many, true} ->
+        quote do
+          list_of(unquote(rel[:target]))
+        end
+
+      {:has_many, false} ->
+        quote do
+          list_of(non_null(unquote(rel[:target])))
+        end
+
+      {_, true} ->
+        quote do
+          unquote(rel[:target])
+        end
+
+      {_, false} ->
+        quote do
+          non_null(unquote(rel[:target]))
+        end
+    end
+  end
+
   defp graphql_relation_fields(e, schema, opts \\ []) do
     skip_fun = Keyword.get(opts, :skip_fun, fn _, _ -> false end)
 
     e[:relations]
+    |> Enum.reject(&Entity.virtual?/1)
     |> Enum.reject(fn rel ->
       # inside input types, we don't want to include children
       # relations. Also we might want to skip certain entities depdending
@@ -150,28 +176,7 @@ defmodule Graphism.Graphql do
         Entity.optional?(rel) ||
           rel[:opts][:allow] != nil
 
-      kind =
-        case {rel[:kind], optional} do
-          {:has_many, true} ->
-            quote do
-              list_of(unquote(rel[:target]))
-            end
-
-          {:has_many, false} ->
-            quote do
-              list_of(non_null(unquote(rel[:target])))
-            end
-
-          {_, true} ->
-            quote do
-              unquote(rel[:target])
-            end
-
-          {_, false} ->
-            quote do
-              non_null(unquote(rel[:target]))
-            end
-        end
+      kind = graphql_relation_kind(rel, optional)
 
       case opts[:mode] do
         :update_input ->
@@ -220,6 +225,27 @@ defmodule Graphism.Graphql do
                 )
               end
           end
+      end
+    end)
+  end
+
+  defp graphql_virtual_relation_fields(e) do
+    e[:relations]
+    |> Enum.filter(&Entity.virtual?/1)
+    |> Enum.map(fn rel ->
+      optional = Entity.optional?(rel)
+      kind = graphql_relation_kind(rel, optional)
+      hook = get_in(rel, [:opts, :using])
+
+      quote do
+        field(
+          unquote(rel[:name]),
+          unquote(kind),
+          resolve: fn parent, args, %{context: context} ->
+            context = Map.drop(context, [:loader, :__absinthe_plug__, :pubsub])
+            unquote(hook).execute(parent, context)
+          end
+        )
       end
     end)
   end
@@ -492,8 +518,9 @@ defmodule Graphism.Graphql do
   end
 
   defp graphql_query_find_by_parent_queries(e, _schema) do
-    e[:relations]
-    |> Enum.filter(fn rel -> :belongs_to == rel[:kind] end)
+    e
+    |> Entity.parent_relations()
+    |> Enum.reject(&Entity.virtual?/1)
     |> Enum.map(fn rel ->
       quote do
         @desc "Find all " <>
@@ -510,8 +537,9 @@ defmodule Graphism.Graphql do
   end
 
   defp graphql_query_aggregate_by_parent_queries(e, _schema) do
-    e[:relations]
-    |> Enum.filter(fn rel -> :belongs_to == rel[:kind] end)
+    e
+    |> Entity.parent_relations()
+    |> Enum.reject(&Entity.virtual?/1)
     |> Enum.map(fn rel ->
       name = String.to_atom("aggregate_by_#{rel[:name]}")
       description = "Aggregate all #{e[:plural_display_name]} by their parent #{rel[:target]}"
@@ -752,16 +780,16 @@ defmodule Graphism.Graphql do
              |> Enum.reject(&Entity.computed?/1)
              |> Enum.reject(&(Entity.virtual?(&1) && get_in(&1, [:opts, :using])))
              |> Enum.map(&mutation_arg_from_attribute(e, &1))) ++
-            (e[:relations]
-             |> Enum.filter(fn rel -> :belongs_to == rel[:kind] end)
+            (e
+             |> Entity.parent_relations()
              |> Enum.reject(&Entity.computed?/1)
-             |> Enum.reject(&(Entity.virtual?(&1) && get_in(&1, [:opts, :using])))
+             |> Enum.reject(&Entity.virtual?/1)
              |> Enum.map(&mutation_arg_from_relation(schema, e, &1, :create))) ++
             (e[:relations]
              |> Enum.filter(fn rel ->
                :has_many == rel[:kind] && Entity.inline_relation?(rel, :create)
              end)
-             |> Enum.reject(&(Entity.virtual?(&1) && get_in(&1, [:opts, :using])))
+             |> Enum.reject(&Entity.virtual?/1)
              |> Enum.map(&mutation_arg_from_inlined_relation(e, &1)))
         )
 
@@ -795,8 +823,8 @@ defmodule Graphism.Graphql do
                  )
                end
              end)) ++
-            (e[:relations]
-             |> Enum.filter(fn rel -> :belongs_to == rel[:kind] end)
+            (e
+             |> Entity.parent_relations()
              |> Enum.reject(&Entity.computed?/1)
              |> Enum.reject(&(Entity.virtual?(&1) && get_in(&1, [:opts, :using])))
              |> Enum.reject(&Entity.immutable?/1)
