@@ -200,6 +200,10 @@ defmodule Graphism.Entity do
     end
   end
 
+  def inverse_relation_if_exists(schema, e, name) do
+    with nil <- inverse_relation(schema, e, name), do: []
+  end
+
   def inline_relation?(rel, action) do
     Enum.member?(rel[:opts][:inline] || [], action)
   end

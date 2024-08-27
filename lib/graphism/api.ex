@@ -140,7 +140,7 @@ defmodule Graphism.Api do
           with {:ok, sort_direction} <- cast_sort_direction(direction),
                {:ok, sort_column} <- sort_column(field) do
             opts = [{sort_direction, sort_column}]
-            {:ok, from(i in subquery(query), order_by: ^opts)}
+            {:ok, from(i in query, order_by: ^opts)}
           end
         end
 
