@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Upgrade to Elixir 1.17 - [158](https://github.com/Otion-Core/graphism/pull/158)
+
 # v0.16.0 (Sep 20th, 2024)
 
 - New scopes - [#157](https://github.com/Otion-Core/graphism/pull/157)

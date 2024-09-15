@@ -546,7 +546,7 @@ defmodule Graphism.Resolver do
     |> with_parent_entities_fetch_from_rels(e, schema, opts)
   end
 
-  defp with_parent_entities_fetch_from_rels(rels, e, schema, opts \\ []) do
+  defp with_parent_entities_fetch_from_rels(rels, e, schema, opts) do
     api_module = e[:api_module]
 
     Enum.map(rels, fn rel ->

@@ -16,7 +16,7 @@ defmodule Graphism.Policy do
     %{all: Enum.map(exprs, &expression/1), name: name}
   end
 
-  def scope_from(name, do: {:__block__, _, [{:not, _, [expr]}]}) do
+  def scope_from(name, do: {:not, _, [expr]}) do
     expr
     |> expression()
     |> negate()
