@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Explicit inverse relations - [#160](https://github.com/Otion-Core/graphism/pull/160)
+
 # v0.16.0 (Sep 20th, 2024)
 
 - New scopes - [#157](https://github.com/Otion-Core/graphism/pull/157)
