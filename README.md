@@ -308,6 +308,14 @@ entity :node do
 end
 ```
 
+It is also possible to leverage Ecto's `though` has many relations:
+
+```elixir
+entity :blog do
+  has_many(:tags, through: [:posts, :tags])
+end
+```
+
 ### Computed relations
 
 Relations can also be declared as computed in two different ways, explicitly and implicitly. Explict computed relations are declared with a `:using` hook:

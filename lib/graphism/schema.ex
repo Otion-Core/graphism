@@ -96,15 +96,26 @@ defmodule Graphism.Schema do
                   end
 
                 :has_many ->
-                  inverse_rel = Entity.inverse_relation!(schema, e, rel[:name])
-                  foreign_key = String.to_atom("#{inverse_rel[:name]}_id")
+                  case rel[:opts][:through] do
+                    nil ->
+                      inverse_rel = Entity.inverse_relation!(schema, e, rel[:name])
+                      foreign_key = String.to_atom("#{inverse_rel[:name]}_id")
 
-                  quote do
-                    Ecto.Schema.has_many(
-                      unquote(rel[:name]),
-                      unquote(schema_module),
-                      foreign_key: unquote(foreign_key)
-                    )
+                      quote do
+                        Ecto.Schema.has_many(
+                          unquote(rel[:name]),
+                          unquote(schema_module),
+                          foreign_key: unquote(foreign_key)
+                        )
+                      end
+
+                    through ->
+                      quote do
+                        Ecto.Schema.has_many(
+                          unquote(rel[:name]),
+                          through: unquote(through)
+                        )
+                      end
                   end
               end
             end)
@@ -261,177 +272,6 @@ defmodule Graphism.Schema do
         end
 
         def query, do: from(unquote(Ast.var(e[:name])) in unquote(schema_module), as: unquote(e[:name]))
-
-        def join(q, rel, opts \\ [])
-
-        unquote_splicing(
-          e
-          |> Entity.parent_relations()
-          |> Enum.map(fn rel ->
-            target = Entity.find_entity!(schema, rel[:target])
-            column_name = Keyword.fetch!(rel, :column)
-            target_schema = Keyword.fetch!(target, :schema_module)
-
-            quote do
-              def join(q, unquote(rel[:name]), opts) do
-                parent_binding = Keyword.get(opts, :parent, unquote(rel[:name]))
-                child_binding = Keyword.get(opts, :child, unquote(e[:name]))
-
-                if has_named_binding?(q, parent_binding) do
-                  join(q, :inner, [{^child_binding, child}], parent in unquote(target_schema),
-                    on: parent.id == child.unquote(column_name)
-                  )
-                else
-                  join(q, :inner, [{^child_binding, child}], parent in unquote(target_schema),
-                    as: ^parent_binding,
-                    on: parent.id == child.unquote(column_name)
-                  )
-                end
-              end
-            end
-          end)
-        )
-
-        unquote_splicing(
-          e
-          |> Entity.child_relations()
-          |> Enum.map(fn rel ->
-            target = Entity.find_entity!(schema, rel[:target])
-            target_schema = Keyword.fetch!(target, :schema_module)
-            inverse_rel = Entity.inverse_relation!(schema, e, rel[:name])
-            column_name = Keyword.fetch!(inverse_rel, :column)
-
-            quote do
-              def join(q, unquote(rel[:name]), opts) do
-                parent_binding = Keyword.get(opts, :parent, unquote(inverse_rel[:name]))
-                child_binding = Keyword.get(opts, :child, unquote(rel[:name]))
-
-                if has_named_binding?(q, child_binding) do
-                  join(q, :inner, [{^parent_binding, parent}], child in unquote(target_schema),
-                    on: parent.id == child.unquote(column_name)
-                  )
-                else
-                  join(q, :inner, [{^parent_binding, parent}], child in unquote(target_schema),
-                    as: ^child_binding,
-                    on: parent.id == child.unquote(column_name)
-                  )
-                end
-              end
-            end
-          end)
-        )
-
-        def join(_, other, _) do
-          raise "Cannot join #{inspect(__MODULE__)} on #{inspect(other)}. No such relation."
-        end
-
-        unquote_splicing(
-          e
-          |> Entity.parent_relations()
-          |> Enum.map(fn rel ->
-            column_name = Keyword.fetch!(rel, :column)
-
-            quote do
-              def filter(q, unquote(rel[:name]), :eq, nil, opts) do
-                binding = Keyword.get(opts, :parent, unquote(rel[:name]))
-
-                where(q, [{^binding, e}], is_nil(e.unquote(column_name)))
-              end
-
-              def filter(q, unquote(rel[:name]), :eq, id, opts) do
-                binding = Keyword.get(opts, :parent, unquote(rel[:name]))
-
-                where(q, [{^binding, e}], e.unquote(column_name) == ^id)
-              end
-
-              def filter(q, unquote(rel[:name]), :neq, nil, opts) do
-                binding = Keyword.get(opts, :parent, unquote(rel[:name]))
-
-                where(q, [{^binding, e}], not is_nil(e.unquote(column_name)))
-              end
-
-              def filter(q, unquote(rel[:name]), :neq, id, opts) do
-                binding = Keyword.get(opts, :parent, unquote(rel[:name]))
-
-                where(q, [{^binding, e}], e.unquote(column_name) != ^id)
-              end
-
-              def filter(q, unquote(rel[:name]), :in, ids, opts) when is_list(ids) do
-                binding = Keyword.get(opts, :parent, unquote(rel[:name]))
-
-                where(q, [{^binding, e}], e.unquote(column_name) in ^ids)
-              end
-            end
-          end)
-          |> List.flatten()
-        )
-
-        unquote_splicing(
-          e
-          |> Entity.child_relations()
-          |> Enum.map(fn rel ->
-            quote do
-              def filter(q, unquote(rel[:name]), op, value, opts) do
-                child_binding = Keyword.get(opts, :child, unquote(rel[:name]))
-
-                q
-                |> __MODULE__.join(unquote(rel[:name]), opts)
-                |> do_filter(:id, op, value, child_binding)
-              end
-            end
-          end)
-        )
-
-        unquote_splicing(
-          e[:attributes]
-          |> Enum.reject(&Entity.virtual?/1)
-          |> Enum.map(fn attr ->
-            column_name = attr[:name]
-
-            quote do
-              def filter(q, unquote(attr[:name]), op, value, opts) do
-                binding = Keyword.get(opts, :on, unquote(e[:name]))
-                do_filter(q, unquote(column_name), op, value, binding)
-              end
-            end
-          end)
-        )
-
-        defp do_filter(q, column_name, :neq, nil, binding) do
-          where(q, [{^binding, e}], not is_nil(field(e, ^column_name)))
-        end
-
-        defp do_filter(q, column_name, _, nil, binding) do
-          where(q, [{^binding, e}], is_nil(field(e, ^column_name)))
-        end
-
-        defp do_filter(q, column_name, :eq, value, binding) do
-          where(q, [{^binding, e}], field(e, ^column_name) == ^value)
-        end
-
-        defp do_filter(q, column_name, :neq, value, binding) do
-          where(q, [{^binding, e}], field(e, ^column_name) != ^value)
-        end
-
-        defp do_filter(q, column_name, :gte, value, binding) do
-          where(q, [{^binding, e}], field(e, ^column_name) >= ^value)
-        end
-
-        defp do_filter(q, column_name, :gt, value, binding) do
-          where(q, [{^binding, e}], field(e, ^column_name) > ^value)
-        end
-
-        defp do_filter(q, column_name, :lte, value, binding) do
-          where(q, [{^binding, e}], field(e, ^column_name) <= ^value)
-        end
-
-        defp do_filter(q, column_name, :lt, value, binding) do
-          where(q, [{^binding, e}], field(e, ^column_name) < ^value)
-        end
-
-        defp do_filter(q, column_name, :in, values, binding) when is_list(values) do
-          where(q, [{^binding, e}], field(e, ^column_name) in ^values)
-        end
       end
     end
   end
@@ -696,12 +536,14 @@ defmodule Graphism.Schema do
         inverse
         |> Keyword.take([:name, :kind, :target])
         |> Keyword.put(:column_name, inverse[:column])
+        |> Keyword.put(:source, target[:name])
         |> Map.new()
 
       rel =
         rel
         |> Keyword.take([:name, :kind])
         |> Keyword.put(:target, target)
+        |> Keyword.put(:source, e[:name])
         |> Keyword.put(:inverse, inverse)
         |> Keyword.put(:column_name, rel[:column])
         |> Keyword.put(:required?, Entity.required?(rel))

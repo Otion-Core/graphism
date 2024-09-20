@@ -41,7 +41,7 @@ defmodule Graphism.Entity do
            name == e[:name]
          end) do
       [] ->
-        raise "Could not resolve entity #{name}: #{inspect(Enum.map(schema, fn e -> e[:name] end))}"
+        raise "Could not resolve entity #{inspect(name)}. Known entities: #{inspect(Enum.map(schema, fn e -> e[:name] end))}"
 
       [e] ->
         e
@@ -134,7 +134,7 @@ defmodule Graphism.Entity do
 
     unless attr do
       raise """
-      no such attribute #{name} in entity #{e[:name]}.
+      no such attribute #{inspect(name)} in entity #{inspect(e[:name])}.
         Existing attributes: #{e[:attributes] |> names() |> inspect()}"
       """
     end
@@ -159,7 +159,7 @@ defmodule Graphism.Entity do
 
     unless rel do
       raise """
-      no such relation #{name} in entity #{e[:name]}.
+      no such relation #{inspect(name)} in entity #{inspect(e[:name])}.
         Existing relations: #{e[:relations] |> names() |> inspect()}"
       """
     end
@@ -545,6 +545,7 @@ defmodule Graphism.Entity do
               end
 
               rel
+              |> Keyword.put(:source, e[:name])
               |> Keyword.put(:target, target)
               |> Keyword.put(:name, rel[:opts][:as] || rel[:name])
 
@@ -558,6 +559,7 @@ defmodule Graphism.Entity do
               name = rel[:opts][:as] || rel[:name]
 
               rel
+              |> Keyword.put(:source, e[:name])
               |> Keyword.put(:target, target[:name])
               |> Keyword.put(:name, name)
               |> Keyword.put(:column, String.to_atom("#{name}_id"))
@@ -866,6 +868,10 @@ defmodule Graphism.Entity do
   end
 
   defp slug_field({:__block__, _, fields}) do
+    slug_field(fields)
+  end
+
+  defp slug_field(fields) do
     fields
     |> Enum.map(fn
       {:slug, _, [field]} -> field
