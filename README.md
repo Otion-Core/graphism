@@ -277,6 +277,37 @@ entity :post do
 end
 ```
 
+
+### Relations
+
+Graphism ony supports two types of relations: `belongs_to` and `has_many`. We believe these two are
+enough to cover a wide range of schema designs:
+
+
+```elixir
+entity :blog do
+  has_many(:posts)
+end
+```
+
+```elixir
+entity :post do
+  belongs_to(:post)
+end
+```
+
+The names of these relations can be customized with the `as:` keyword. Also, it is possible to
+instruct Graphim which relation is the associated `inverse:` one, wheen disambiguation is needed, eg:
+
+```elixir
+entity :node do
+  belongs_to(:node, as: left_parent)
+  belongs_to(:node, as: right_parent)
+  has_many(:node, as: left_children, inverse: :left_parent)
+  has_many(:node, as: right_children, inverse: :right_parent)
+end
+```
+
 ### Computed relations
 
 Relations can also be declared as computed in two different ways, explicitly and implicitly. Explict computed relations are declared with a `:using` hook:
