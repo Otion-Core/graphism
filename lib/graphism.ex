@@ -19,7 +19,7 @@ defmodule Graphism do
     Code.compiler_options(ignore_module_conflict: true)
 
     repo = Keyword.fetch!(opts, :repo)
-    auth = opts[:auth]
+    auth = opts[:auth] || __CALLER__.module
     styles = opts[:styles] || [:graphql]
 
     Module.register_attribute(__CALLER__.module, :data,

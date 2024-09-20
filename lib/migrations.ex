@@ -875,7 +875,7 @@ defmodule Graphism.Migrations do
   end
 
   defp parse_migration({:defmodule, _, [{:__aliases__, _, migration}, _]}) do
-    Logger.warn("Unable to parse migration #{Enum.join(migration, ".")}")
+    Logger.warning("Unable to parse migration #{Enum.join(migration, ".")}")
     []
   end
 
@@ -1022,7 +1022,7 @@ defmodule Graphism.Migrations do
   defp parse_up({:drop, _, [{:constraint, _, _}]}), do: []
 
   defp parse_up(other) do
-    Logger.warn(
+    Logger.warning(
       "Unable to parse migration code #{inspect(other)}: #{other |> Macro.to_string() |> Code.format_string!()}"
     )
 
