@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+# v0.16.0 (Sep 20th, 2024)
+
+- New scopes - [#157](https://github.com/Otion-Core/graphism/pull/157)
+
 # v0.15.0 (Mar 18th, 2024)
 
 - Virtual relations - [#155](https://github.com/Otion-Core/graphism/pull/155)
