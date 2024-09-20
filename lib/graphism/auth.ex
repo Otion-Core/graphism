@@ -44,7 +44,13 @@ defmodule Graphism.Auth do
         def allow?(unquote(e[:name]), unquote(action), args, context) do
           context
           |> roles()
-          |> policy_allow?(unquote(Macro.escape(policies)), unquote(default_policy), args, context, unquote(paths))
+          |> policy_allow?(
+            unquote(Macro.escape(policies)),
+            unquote(default_policy),
+            args,
+            context,
+            unquote(paths)
+          )
         end
       end
     end
@@ -217,7 +223,7 @@ defmodule Graphism.Auth do
         def scope(unquote(e[:name]), unquote(action), q, context) do
           context
           |> roles()
-          |> do_scope(unquote(Macro.escape(policies)), q, unquote(e[:name]), unquote(e[:schema_module]), context)
+          |> do_scope(unquote(Macro.escape(policies)), q, unquote(e[:schema_module]), context)
         end
       end
     end
@@ -233,65 +239,28 @@ defmodule Graphism.Auth do
 
   defp scope_helper_fun do
     quote do
-      defp do_scope(roles, _, q, _, _, _) when is_nil(roles) or roles == [], do: return_nothing(q)
+      defp do_scope(roles, _, q, _, _) when is_nil(roles) or roles == [], do: return_nothing(q)
 
-      defp do_scope(roles, policies, q, entity, schema, context) do
+      defp do_scope(roles, policies, q, entity_module, context) do
         roles
         |> policy_from_roles(policies)
-        |> do_scope(q, entity, schema, context)
+        |> apply_scope(q, entity_module, context)
       end
 
-      defp do_scope({:allow, %{any: policies}}, q, entity, schema, context) do
-        scope_all(policies, q, entity, schema, context, :union)
+      defp apply_scope(:deny, q, _, _), do: return_nothing(q)
+      defp apply_scope(:allow, q, _, _), do: q
+
+      defp apply_scope(policy, q, entity_module, context) do
+        case Graphism.Policy.to_scope(policy) do
+          nil ->
+            return_nothing(q)
+
+          scope ->
+            Graphism.Scope.scope(entity_module, q, scope, context)
+        end
       end
 
-      defp do_scope({:allow, %{all: policies}}, q, entity, schema, context) do
-        scope_all(policies, q, entity, schema, context, :intersect)
-      end
-
-      defp do_scope({:allow, policy}, q, entity, schema, context) do
-        do_scope(policy, q, entity, schema, context)
-      end
-
-      defp do_scope(%{any: policies}, q, entity, schema, context) do
-        scope_all(policies, q, entity, schema, context, :union)
-      end
-
-      defp do_scope(%{all: policies}, q, entity, schema, context) do
-        scope_all(policies, q, entity, schema, context, :intersect)
-      end
-
-      defp do_scope(%{prop: prop, value: value_spec, op: op}, q, entity, schema, context) do
-        value = evaluate(context, value_spec) |> maybe_ids()
-
-        filter(schema, prop, op, value, q, entity)
-      end
-
-      defp do_scope(nil, q, _, _, _), do: return_nothing(q)
-      defp do_scope([], q, _, _, _), do: return_nothing(q)
-      defp do_scope(:deny, q, _, _, _), do: return_nothing(q)
-      defp do_scope(:allow, q, _, _, _), do: q
-
-      defp scope_all(policies, q, entity, schema, context, op) do
-        with nil <-
-               Enum.reduce(policies, nil, fn policy, prev ->
-                 q = do_scope(policy, q, entity, schema, context)
-                 combine_queries(q, prev, op)
-               end),
-             do: return_nothing(q)
-      end
-
-      defp return_nothing(q), do: where(q, [p], 1 == 2)
-
-      defp maybe_ids(%{id: id}), do: id
-      defp maybe_ids(items) when is_list(items), do: Enum.map(items, &maybe_ids/1)
-      defp maybe_ids(other), do: other
-
-      defp combine_queries(q, q, _), do: q
-      defp combine_queries(q, nil, _), do: q
-      defp combine_queries(nil, prev, _), do: prev
-      defp combine_queries(q, prev, :union), do: Ecto.Query.union(q, ^prev)
-      defp combine_queries(q, prev, :intersect), do: Ecto.Query.intersect(prev, ^q)
+      defp return_nothing(q), do: where(q, [p], false)
     end
   end
 

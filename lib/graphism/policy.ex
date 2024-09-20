@@ -1,6 +1,9 @@
 defmodule Graphism.Policy do
   @moduledoc false
 
+  alias Graphism.Scope
+  alias Graphism.Scope.Expression
+
   def scope?(scopes, name) do
     Map.has_key?(scopes, name)
   end
@@ -72,7 +75,7 @@ defmodule Graphism.Policy do
     split(v)
   end
 
-  defp value([v|_] = values) when is_binary(v) do
+  defp value([v | _] = values) when is_binary(v) do
     Enum.map(values, &value/1)
   end
 
@@ -120,5 +123,43 @@ defmodule Graphism.Policy do
 
   defp resolve_scope(%{op: _, prop: _, value: _} = scope, _scopes) do
     scope
+  end
+
+  @doc """
+  Transforms a policy into a scope
+
+  It is practicall the same information, in a slighly different shape
+  """
+  def to_scope([]), do: nil
+
+  def to_scope({:allow, policy}) do
+    to_scope(policy)
+  end
+
+  def to_scope(%{all: expressions}) do
+    to_scope(:all, expressions)
+  end
+
+  def to_scope(%{any: expressions}) do
+    to_scope(:one, expressions)
+  end
+
+  def to_scope(%{op: op, prop: prop, value: value} = policy) do
+    %Scope{
+      name: Map.get(policy, :name),
+      expression: %Expression{
+        op: op,
+        args: [prop, value]
+      }
+    }
+  end
+
+  defp to_scope(combinator, expressions) do
+    %Scope{
+      expression: %Expression{
+        op: combinator,
+        args: Enum.map(expressions, &to_scope/1)
+      }
+    }
   end
 end

@@ -9,6 +9,7 @@ defmodule Graphism do
 
   alias Graphism.{
     Entity,
+    Graph,
     Policy
   }
 
@@ -153,6 +154,13 @@ defmodule Graphism do
       Entity.ensure_action_scopes!(e, scopes)
     end)
 
+    graph = Graph.build(schema)
+
+    graph_fun = Graph.graph_fun(graph)
+    shortest_path_fun = Graph.shortest_path_fun()
+    paths_fun = Graph.paths_fun()
+    diagram_fun = Graph.diagram_fun(graph)
+
     enums_fun =
       quote do
         def enums() do
@@ -173,7 +181,7 @@ defmodule Graphism do
       schema
       |> Enum.reject(&Entity.virtual?(&1))
       |> Enum.map(fn e ->
-        Graphism.Schema.schema_module(e, schema)
+        Graphism.Schema.schema_module(e, schema, repo, caller_module)
       end)
 
     auth_funs =
@@ -189,7 +197,6 @@ defmodule Graphism do
       end)
 
     dataloader_module = Graphism.Dataloader.dataloader_module(caller_module)
-    schema_filter_fun = Graphism.Querying.filter_fun()
     schema_evaluate_fun = Graphism.Querying.evaluate_fun(repo)
     schema_compare_fun = Graphism.Querying.compare_fun()
 
@@ -258,9 +265,12 @@ defmodule Graphism do
         auth_funs,
         api_modules,
         dataloader_module,
-        schema_filter_fun,
         schema_evaluate_fun,
-        schema_compare_fun
+        schema_compare_fun,
+        graph_fun,
+        shortest_path_fun,
+        paths_fun,
+        diagram_fun
       ] ++ graphql_modules ++ rest_modules
     )
   end

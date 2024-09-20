@@ -14,12 +14,14 @@ defmodule Graphism.Schema do
     end)
   end
 
-  def schema_module(e, schema) do
+  def schema_module(e, schema, repo, graphism_schema) do
     indices = Migrations.indices_from_attributes(e) ++ Migrations.indices_from_keys(e)
     stored_attributes = Enum.reject(e[:attributes], fn attr -> attr[:name] == :id or Entity.virtual?(attr) end)
     stored_relations = Enum.reject(e[:relations], &Entity.virtual?/1)
     scope_columns = Enum.map(e[:opts][:scope] || [], fn col -> String.to_atom("#{col}_id") end)
     schema_module = Keyword.fetch!(e, :schema_module)
+    fields_metadata = fields_metadata(e, schema)
+    graphism_schema = graphism_schema
 
     quote do
       defmodule unquote(schema_module) do
@@ -29,7 +31,12 @@ defmodule Graphism.Schema do
 
         unquote_splicing(slugify_module(e))
 
-        def entity, do: unquote(e[:name])
+        @name unquote(e[:name])
+
+        def entity, do: @name
+        def name, do: @name
+        def schema, do: unquote(schema_module)
+        def repo, do: unquote(repo)
 
         unquote_splicing(
           e[:relations]
@@ -147,9 +154,18 @@ defmodule Graphism.Schema do
                            end)
                          )
 
+        @fields_metadata unquote(Macro.escape(fields_metadata))
+
         def required_fields, do: @required_fields
         def optional_fields, do: @optional_fields
         def computed_fields, do: @computed_fields
+
+        def field(name) do
+          case Map.get(@fields_metadata, name) do
+            nil -> {:error, :unknown_field}
+            field -> {:ok, field}
+          end
+        end
 
         unquote_splicing(
           (Entity.names(stored_attributes) ++ [:id, :inserted_at, :updated_at])
@@ -169,16 +185,8 @@ defmodule Graphism.Schema do
 
         def field_specs(_), do: []
 
-        unquote_splicing(relation_paths_ast(e, schema))
-        unquote_splicing(attribute_paths_ast(e, schema))
-
-        def paths_to(_), do: []
-
-        def shortest_path_to(ancestor) do
-          ancestor
-          |> paths_to()
-          |> Enum.sort_by(&length/1)
-          |> List.first() || []
+        def shortest_path(field) do
+          unquote(graphism_schema).shortest_path(@name, field)
         end
 
         unquote_splicing(inverse_relation_ast(e, schema))
@@ -527,74 +535,6 @@ defmodule Graphism.Schema do
     end)
   end
 
-  defp hierarchy(e, schema) do
-    e
-    |> Entity.parent_relations()
-    |> Enum.reject(fn rel -> rel[:target] == e[:name] end)
-    |> Enum.map(fn rel ->
-      {
-        rel[:name],
-        schema
-        |> Entity.find_entity!(rel[:target])
-        |> hierarchy(schema)
-      }
-    end)
-    |> Enum.into(%{})
-  end
-
-  defp hierarchy_paths(tree, []) when map_size(tree) == 0 do
-    []
-  end
-
-  defp hierarchy_paths(tree, context) when map_size(tree) == 0 do
-    [List.to_tuple(context)]
-  end
-
-  defp hierarchy_paths(tree, context) do
-    Enum.flat_map(tree, fn {parent, ancestors} ->
-      hierarchy_paths(ancestors, context ++ [parent])
-    end)
-  end
-
-  defp paths_to(step, paths) do
-    paths
-    |> Enum.filter(&Enum.member?(&1, step))
-    |> Enum.map(fn path ->
-      index = Enum.find_index(path, fn s -> s == step end)
-      {path, _} = Enum.split(path, index + 1)
-      path
-    end)
-    |> Enum.uniq()
-    |> Enum.sort_by(&length/1)
-  end
-
-  defp relation_paths_ast(e, schema) do
-    paths =
-      e
-      |> hierarchy(schema)
-      |> hierarchy_paths([])
-      |> Enum.map(&Tuple.to_list/1)
-
-    paths
-    |> List.flatten()
-    |> Enum.uniq()
-    |> Enum.map(fn step ->
-      quote do
-        def paths_to(unquote(step)) do
-          unquote(paths_to(step, paths))
-        end
-      end
-    end)
-  end
-
-  defp attribute_paths_ast(e, _schema) do
-    Enum.map(e[:attributes], fn attr ->
-      quote do
-        def paths_to(unquote(attr[:name])), do: [[unquote(attr[:name])]]
-      end
-    end)
-  end
-
   defp inverse_relation_ast(e, schema) do
     for rel <- Entity.relations(e) do
       with inverse when inverse != nil <- Entity.inverse_relation(schema, e, rel[:name]) do
@@ -718,5 +658,56 @@ defmodule Graphism.Schema do
       end
     end)
     |> Enum.reject(&is_nil/1)
+  end
+
+  defp fields_metadata(e, schema) do
+    attributes_metadata = attributes_metadata(e, schema)
+    relations_metadata = relations_metadata(e, schema)
+
+    Map.merge(attributes_metadata, relations_metadata)
+  end
+
+  defp attributes_metadata(e, _schema) do
+    for attr <- e[:attributes], into: %{} do
+      attr =
+        attr
+        |> Keyword.take([:name, :kind])
+        |> Keyword.put(:column_name, attr[:name])
+        |> Keyword.put(:required?, Entity.required?(attr))
+        |> Map.new()
+
+      {attr.name, attr}
+    end
+  end
+
+  defp relations_metadata(e, schema) do
+    for rel <- e[:relations], into: %{} do
+      target = Entity.find_entity!(schema, rel[:target])
+
+      target =
+        target
+        |> Keyword.take([:name])
+        |> Keyword.put(:module, target[:schema_module])
+        |> Map.new()
+
+      inverse = Entity.inverse_relation_if_exists(schema, e, rel[:name])
+
+      inverse =
+        inverse
+        |> Keyword.take([:name, :kind, :target])
+        |> Keyword.put(:column_name, inverse[:column])
+        |> Map.new()
+
+      rel =
+        rel
+        |> Keyword.take([:name, :kind])
+        |> Keyword.put(:target, target)
+        |> Keyword.put(:inverse, inverse)
+        |> Keyword.put(:column_name, rel[:column])
+        |> Keyword.put(:required?, Entity.required?(rel))
+        |> Map.new()
+
+      {rel.name, rel}
+    end
   end
 end
