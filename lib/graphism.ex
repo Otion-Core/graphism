@@ -322,6 +322,7 @@ defmodule Graphism do
     entity =
       [
         name: name,
+        graphism_schema: caller_module,
         schema_module: schema_module,
         attributes: attrs,
         relations: rels,

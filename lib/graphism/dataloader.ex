@@ -246,16 +246,45 @@ defmodule Graphism.Dataloader do
   end
 
   defp dataloader_source(schema, e, target, rel, :has_many) do
-    inverse_rel = Entity.inverse_relation!(schema, e, rel[:name])
     schema_module = Keyword.fetch!(e, :schema_module)
 
-    quote do
-      {
-        unquote(target[:schema_module]),
-        unquote(String.to_atom("list_by_#{inverse_rel[:name]}")),
-        [parent.id],
-        unquote(schema_module)
-      }
+    case rel[:opts][:through] do
+      nil ->
+        inverse_rel = Entity.inverse_relation!(schema, e, rel[:name])
+
+        quote do
+          {
+            unquote(target[:schema_module]),
+            unquote(String.to_atom("list_by_#{inverse_rel[:name]}")),
+            [parent.id],
+            unquote(schema_module)
+          }
+        end
+
+      through ->
+        inverse_rel = Graphism.Through.inverse_relation!(schema, e, through)
+
+        case inverse_rel[:kind] do
+          :belongs_to ->
+            quote do
+              {
+                unquote(target[:schema_module]),
+                unquote(String.to_atom("list_by_#{inverse_rel[:name]}")),
+                Graphism.Through.parent_ids(parent, unquote(through)),
+                unquote(schema_module)
+              }
+            end
+
+          :has_many ->
+            quote do
+              {
+                unquote(target[:schema_module]),
+                unquote(String.to_atom("list_by_ids")),
+                Graphism.Through.children_ids(parent, unquote(through)),
+                unquote(schema_module)
+              }
+            end
+        end
     end
   end
 
@@ -273,15 +302,56 @@ defmodule Graphism.Dataloader do
   end
 
   defp dataloader_value_fun(schema, e, _target, rel, :has_many) do
-    inverse_rel = Entity.inverse_relation!(schema, e, rel[:name])
+    case rel[:opts][:through] do
+      nil ->
+        inverse_rel = Entity.inverse_relation!(schema, e, rel[:name])
 
-    quote do
-      fn items ->
-        items
-        |> Map.values()
-        |> Enum.filter(&(&1.unquote(inverse_rel[:column]) == parent.id))
-        |> Enum.sort_by(& &1.inserted_at)
-      end
+        quote do
+          fn items ->
+            items
+            |> Map.values()
+            |> Enum.filter(&(&1.unquote(inverse_rel[:column]) == parent.id))
+            |> Enum.sort_by(& &1.inserted_at)
+          end
+        end
+
+      through ->
+        inverse_rel = Graphism.Through.inverse_relation!(schema, e, through)
+
+        case inverse_rel[:kind] do
+          :belongs_to ->
+            quote do
+              fn items ->
+                parent_ids =
+                  parent
+                  |> Graphism.Through.parent_ids(unquote(through))
+                  # Make sure we work with bounded lists of ids
+                  |> Enum.take(500)
+
+                items
+                |> Map.values()
+                |> Enum.filter(&Enum.member?(parent_ids, &1.unquote(inverse_rel[:column])))
+                |> Enum.sort_by(& &1.inserted_at)
+              end
+            end
+
+          :has_many ->
+            quote do
+              fn items ->
+                children_ids =
+                  parent
+                  |> Graphism.Through.children_ids(
+                    unquote(through)
+                    |> Enum.take(500)
+                  )
+
+                items
+                |> Map.values()
+                |> Enum.filter(&Enum.member?(children_ids, &1.id))
+                |> Enum.sort_by(& &1.inserted_at)
+              end
+            end
+        end
     end
   end
 
