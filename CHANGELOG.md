@@ -2,10 +2,13 @@
 
 ## Unreleased
 
+# v0.16.2 (Sep 22th, 204)
+
+- Through has many relations - [#161](https://github.com/Otion-Core/graphism/pull/161)
+
 # v0.16.1 (Sep 20th, 2024)
 
 - Explicit inverse relations - [#160](https://github.com/Otion-Core/graphism/pull/160)
-- Through has many relations - [#161](https://github.com/Otion-Core/graphism/pull/161)
 
 # v0.16.0 (Sep 20th, 2024)
 
