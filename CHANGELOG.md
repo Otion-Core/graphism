@@ -2,9 +2,12 @@
 
 ## Unreleased
 
+
+# v0.16.3 (Feb 27th, 2025)
+
 - Return always a list of non null values - [#162](https://github.com/Otion-Core/graphism/pull/162)
 
-# v0.16.2 (Sep 22th, 204)
+# v0.16.2 (Sep 22th, 2024)
 
 - Through has many relations - [#161](https://github.com/Otion-Core/graphism/pull/161)
 
