@@ -136,12 +136,7 @@ defmodule Graphism.Graphql do
 
   defp graphql_relation_kind(rel, optional) do
     case {rel[:kind], optional} do
-      {:has_many, true} ->
-        quote do
-          list_of(unquote(rel[:target]))
-        end
-
-      {:has_many, false} ->
+      {:has_many, _} ->
         quote do
           list_of(non_null(unquote(rel[:target])))
         end
@@ -412,7 +407,7 @@ defmodule Graphism.Graphql do
   defp graphql_query_list_all(e, _schema) do
     quote do
       @desc "List all " <> unquote("#{e[:plural_display_name]}")
-      field :all, list_of(unquote(e[:name])) do
+      field :all, list_of(non_null(unquote(e[:name]))) do
         unquote_splicing(graphql_args(@pagination_args, e))
         resolve(&unquote(e[:resolver_module]).list/3)
       end
@@ -527,7 +522,7 @@ defmodule Graphism.Graphql do
                 unquote("#{e[:plural_display_name]}") <>
                 " given their parent " <> unquote("#{rel[:target]}")
         field unquote(String.to_atom("by_#{rel[:name]}")),
-              list_of(unquote(e[:name])) do
+              list_of(non_null(unquote(e[:name]))) do
           arg(unquote(rel[:name]), non_null(:id))
           unquote_splicing(graphql_args(@pagination_args, e))
           resolve(&(unquote(e[:resolver_module]).unquote(String.to_atom("list_by_#{rel[:name]}")) / 3))
@@ -566,7 +561,7 @@ defmodule Graphism.Graphql do
 
       quote do
         @desc unquote(description)
-        field unquote(query_name), list_of(unquote(e[:name])) do
+        field unquote(query_name), list_of(non_null(unquote(e[:name]))) do
           unquote_splicing(args)
           unquote_splicing(graphql_args(@pagination_args, e))
           resolve(&(unquote(e[:resolver_module]).unquote(resolver_fun) / 3))
@@ -867,7 +862,7 @@ defmodule Graphism.Graphql do
     Enum.map(args, fn
       {arg, {:list, kind, :optional}} when is_atom(kind) ->
         quote do
-          arg(unquote(arg), list_of(unquote(kind)))
+          arg(unquote(arg), list_of(non_null(unquote(kind))))
         end
 
       {arg, {kind, :optional}} when is_atom(kind) ->
@@ -913,7 +908,7 @@ defmodule Graphism.Graphql do
               case produces do
                 {:list, produces} ->
                   quote do
-                    list_of(unquote(produces))
+                    list_of(non_null(unquote(produces)))
                   end
 
                 produces ->
